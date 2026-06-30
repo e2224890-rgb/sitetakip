@@ -32,7 +32,7 @@
   /* ===== Mobil app kabuğu: üst bar + çekmece + alt sekme ===== */
   .mobil-bar,.tabbar,.drawer-overlay{display:none;}
   @media(max-width:900px){
-    .app{grid-template-columns:1fr;}
+    .app{grid-template-columns:minmax(0,1fr);}
 
     .mobil-bar{display:flex;align-items:center;gap:11px;position:fixed;top:0;left:0;right:0;z-index:60;
       padding:0 14px;padding-top:env(safe-area-inset-top);height:calc(56px + env(safe-area-inset-top));
@@ -90,8 +90,8 @@
   .saha-bar{display:flex;align-items:center;justify-content:space-between;background:#fff;border-bottom:1px solid var(--border);padding:12px 20px;position:sticky;top:0;z-index:5;}
   .saha-bar .btn.cikis{width:auto;}
 
-  .main{min-height:100vh;}
-  .page{padding:22px 26px;max-width:1480px;}
+  .main{min-height:100vh;min-width:0;}
+  .page{padding:22px 26px;max-width:1480px;min-width:0;width:100%;}
   .crumb{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink2);margin-bottom:16px;flex-wrap:wrap;}
   .crumb a{color:var(--accent);cursor:pointer;font-weight:600;} .crumb .cur{color:var(--ink);font-weight:700;}
 
@@ -103,8 +103,8 @@
   .hero-pill{margin-left:auto;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);padding:8px 16px;border-radius:999px;font-weight:700;font-size:13px;letter-spacing:.05em;}
   @media(max-width:680px){.hero-pill{display:none;}}
 
-  .grid-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
-  @media(max-width:760px){.grid-stats{grid-template-columns:repeat(2,1fr);}}
+  .grid-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:18px;}
+  @media(max-width:760px){.grid-stats{grid-template-columns:repeat(2,minmax(0,1fr));}}
   .stat{background:#fff;border:1px solid var(--border);border-radius:13px;padding:15px;display:flex;gap:11px;align-items:center;}
   .stat-ic{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;flex:none;}
   .stat-num{font-size:21px;font-weight:800;letter-spacing:-.02em;} .stat-lbl{font-size:12.5px;color:var(--ink2);font-weight:600;}
@@ -315,6 +315,8 @@
   .hero{padding:18px;gap:13px;border-radius:14px;}
   .hero h1{font-size:clamp(18px,5.4vw,23px);}
   .head h2,.disp{font-size:clamp(18px,5.2vw,21px);}
+  /* tablolar panel içinde yatay kayar (:has desteklenmese de) */
+  .panel{overflow-x:auto;}
   .panel:has(.htable){overflow-x:auto;-webkit-overflow-scrolling:touch;}
   .htable{min-width:540px;}
   .cards{grid-template-columns:1fr;}
