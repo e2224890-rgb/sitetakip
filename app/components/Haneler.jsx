@@ -171,7 +171,8 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
     let erkek = 0, kadin = 0;
     const yas = { "18-24": 0, "25-34": 0, "35-44": 0, "45-54": 0, "55-64": 0, "65+": 0 };
     ks.forEach((k) => {
-      if (k.cinsiyet === "Erkek") erkek++; else if (k.cinsiyet === "Kadın") kadin++;
+      const c = String(k.cinsiyet || "").toLocaleUpperCase("tr").charAt(0);
+      if (c === "E") erkek++; else if (c === "K") kadin++;
       if (k.dogum_yili) {
         const a = 2026 - k.dogum_yili;
         if (a < 25) yas["18-24"]++; else if (a < 35) yas["25-34"]++; else if (a < 45) yas["35-44"]++;
@@ -405,7 +406,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
           </div></div>
         {haneler === null ? <div className="merkez">Yükleniyor…</div>
           : suzulmus.length === 0 ? <div className="merkez">Kayıt yok.</div> : (
-            <table className="htable">
+            <table className="htable hane-table">
               <thead><tr><th>Hane</th><th>Kişiler</th><th className="sag">Seçmen</th><th className="sag">Üye</th><th className="sag">Ziyaret</th></tr></thead>
               <tbody>
                 {suzulmus.map((h) => {
@@ -431,8 +432,8 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
                           {k.uye && <span className="kchip">Üye</span>}
                         </span>
                       ))}{h.kisiler.length === 0 && <span className="dim">—</span>}</td>
-                      <td className="sag mono">{sec}</td>
-                      <td className="sag mono">{uye}</td>
+                      <td className="sag mono" data-label="Seçmen">{sec}</td>
+                      <td className="sag mono" data-label="Üye">{uye}</td>
                       <td className="sag">
                         <div className="ziyaret-aksiyon">
                           <button className={"vbtn" + (h.ziyaret ? " on" : "")} disabled={mesgul === h.id} onClick={() => setZModal({ id: h.id })}>
