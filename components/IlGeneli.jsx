@@ -34,15 +34,20 @@ export default function IlGeneli({ toplam, mahalleSayisi, bolgeToplam, hazir, on
           <tbody>
             {IST_ILCELER.map((ad) => {
               const aktif = ad === "Başakşehir";
+              const vSecmen = aktif && hazir ? fmt(toplam.kisi) : "—";
+              const vOran = aktif && hazir ? "%" + oran(toplam.uye, toplam.kisi) : "—";
+              const vMah = aktif ? String(mahalleSayisi) : "—";
+              const vBolge = aktif ? fmt(bolgeToplam) : "—";
+              const bos = (v) => (v === "—" ? " bos" : "");
               return (
                 <tr key={ad} className={aktif ? "aktif-row" : ""} onClick={aktif ? onBasaksehir : undefined}
                   style={{ cursor: aktif ? "pointer" : "default" }}>
                   <td><b>{ad}</b>{aktif && <span className="ornek">örnek</span>}</td>
-                  <td className="sag mono">{aktif && hazir ? fmt(toplam.kisi) : "—"}</td>
-                  <td className="sag mono">{aktif && hazir ? "%" + oran(toplam.uye, toplam.kisi) : "—"}</td>
-                  <td className="sag mono">{aktif ? mahalleSayisi : "—"}</td>
-                  <td className="sag mono">{aktif ? fmt(bolgeToplam) : "—"}</td>
-                  <td>{aktif ? <span className="durum aktif">Aktif</span> : <span className="durum bekle">Veri bekliyor</span>}</td>
+                  <td className={"sag mono" + bos(vSecmen)} data-label="Kayıtlı Seçmen">{vSecmen}</td>
+                  <td className={"sag mono" + bos(vOran)} data-label="Üye Oranı">{vOran}</td>
+                  <td className={"sag mono" + bos(vMah)} data-label="Mahalle">{vMah}</td>
+                  <td className={"sag mono" + bos(vBolge)} data-label="Bölge">{vBolge}</td>
+                  <td className="durum-cell">{aktif ? <span className="durum aktif">Aktif</span> : <span className="durum bekle">Veri bekliyor</span>}</td>
                 </tr>
               );
             })}
