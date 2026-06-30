@@ -20,8 +20,8 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
   const baslik = haneBaslik(hane, isSite) || "Hane";
   const yakEtiket = ["", "Çok olumsuz", "Olumsuz", "Kararsız", "Olumlu", "Çok olumlu"];
   return (
-    <div onClick={onKapat} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 22, width: "100%", maxWidth: 460, boxShadow: "0 20px 60px rgba(0,0,0,.25)" }}>
+    <div onClick={onKapat} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16, paddingBottom: "max(16px, env(safe-area-inset-bottom))" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 22, width: "100%", maxWidth: 460, maxHeight: "88vh", overflowY: "auto", WebkitOverflowScrolling: "touch", boxShadow: "0 20px 60px rgba(0,0,0,.25)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
           <h3 style={{ margin: 0, fontSize: 17 }}>{baslik}</h3>
           <span style={{ fontSize: 12, color: hane.ziyaret ? "#16a34a" : "#94a3b8", fontWeight: 700 }}>{hane.ziyaret ? "Ziyaret edildi" : "Bekliyor"}</span>

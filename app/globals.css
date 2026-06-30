@@ -1,7 +1,12 @@
 .kok{--bg:#f4f5f7;--surface:#fff;--surface2:#fafbfc;--border:#e7e9ed;--border2:#d9dce1;
     --ink:#16191d;--ink2:#5a626c;--ink3:#9097a0;--accent:#cf5a26;--accent2:#b94a1c;--accent-weak:#fbeae0;
     --ok:#0f766e;--ok-weak:#e2f0ee;font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--ink);background:var(--bg);min-height:100vh;}
-  *{box-sizing:border-box;margin:0;padding:0;}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  html,body{width:100%;max-width:100%;overflow-x:hidden;overscroll-behavior-y:contain;
+    -webkit-text-size-adjust:100%;text-size-adjust:100%;}
+  img,svg,canvas,video{max-width:100%;}
+  button{-webkit-tap-highlight-color:transparent;}
+  @supports(min-height:100dvh){.kok,.login-wrap,.app,.main{min-height:100dvh;}}
   .disp{font-weight:800;letter-spacing:-.02em;}
   .merkez{padding:60px;text-align:center;color:var(--ink2);}
   .mono{font-variant-numeric:tabular-nums;} .sag{text-align:right;}
@@ -24,7 +29,46 @@
 
   .app{display:grid;grid-template-columns:248px 1fr;min-height:100vh;}
   .app.saha{grid-template-columns:1fr;}
-  @media(max-width:900px){.app{grid-template-columns:1fr;} .sidebar{position:static!important;height:auto!important;}}
+  /* ===== Mobil app kabuğu: üst bar + çekmece + alt sekme ===== */
+  .mobil-bar,.tabbar,.drawer-overlay{display:none;}
+  @media(max-width:900px){
+    .app{grid-template-columns:1fr;}
+
+    .mobil-bar{display:flex;align-items:center;gap:11px;position:fixed;top:0;left:0;right:0;z-index:60;
+      padding:0 14px;padding-top:env(safe-area-inset-top);height:calc(56px + env(safe-area-inset-top));
+      background:rgba(255,255,255,.92);backdrop-filter:saturate(1.4) blur(10px);
+      -webkit-backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--border);}
+    .mobil-bar .ham{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;
+      border:1px solid var(--border);background:#fff;color:var(--ink);flex:none;cursor:pointer;}
+    .mobil-bar .ham:active{background:var(--surface2);}
+    .mobil-bar .mb-logo{width:30px;height:30px;border-radius:8px;flex:none;
+      background:linear-gradient(135deg,#ef6c2e,var(--accent));color:#fff;display:grid;place-items:center;}
+    .mobil-bar .mb-t{font-weight:800;font-size:14px;line-height:1.1;}
+    .mobil-bar .mb-s{font-size:10px;color:var(--ink3);letter-spacing:.03em;}
+    .mobil-bar .mb-badge{margin-left:auto;font-size:11px;font-weight:700;background:var(--accent-weak);
+      color:var(--accent2);border:1px solid #f3c9b3;border-radius:999px;padding:3px 11px;white-space:nowrap;}
+
+    .drawer-overlay{display:block;position:fixed;inset:0;z-index:70;background:rgba(15,23,42,.45);
+      opacity:0;pointer-events:none;transition:opacity .25s ease;}
+    .drawer-overlay.open{opacity:1;pointer-events:auto;}
+
+    .sidebar{position:fixed!important;top:0;left:0;bottom:0;height:100%!important;
+      width:284px;max-width:86vw;z-index:80;transform:translateX(-100%);
+      transition:transform .26s cubic-bezier(.4,0,.2,1);box-shadow:0 0 44px rgba(15,23,42,.2);
+      padding-top:calc(16px + env(safe-area-inset-top));overflow-y:auto;-webkit-overflow-scrolling:touch;}
+    .sidebar.open{transform:translateX(0);}
+
+    .app:not(.saha) .main{padding-top:calc(56px + env(safe-area-inset-top));
+      padding-bottom:calc(64px + env(safe-area-inset-bottom));}
+
+    .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:60;background:#fff;
+      border-top:1px solid var(--border);padding-bottom:env(safe-area-inset-bottom);}
+    .tabbar button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
+      padding:9px 4px 7px;border:none;background:none;color:var(--ink3);font-size:10.5px;
+      font-weight:600;cursor:pointer;}
+    .tabbar button.on{color:var(--accent2);}
+    .tabbar button:active{background:var(--surface2);}
+  }
   .sidebar{background:#fff;border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;}
   .brand{display:flex;gap:10px;align-items:flex-start;padding:0 4px;}
   .brand .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,#ef6c2e,var(--accent));color:#fff;display:grid;place-items:center;flex:none;}
@@ -68,7 +112,10 @@
 
   .panel{background:#fff;border:1px solid var(--border);border-radius:13px;overflow:hidden;}
   .panel.pad{padding:15px;}
-  .panel-h{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);gap:10px;}
+  .panel-h{display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);gap:10px;flex-wrap:wrap;}
+  .panel,.layout,.demo-grid,.mahalle-grid{min-width:0;}
+  .layout>*,.demo-grid>*,.mahalle-grid>*{min-width:0;}
+  .recharts-responsive-container,.recharts-wrapper{min-width:0!important;}
   .panel-h h3{font-size:14.5px;font-weight:700;}
   .rolepill{font-size:12px;color:var(--ink2);}
   .head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px;flex-wrap:wrap;}
@@ -102,8 +149,8 @@
   .legend div{display:flex;align-items:center;gap:8px;} .legend b{margin-left:auto;color:var(--ink);}
   .dot{width:10px;height:10px;border-radius:3px;display:inline-block;}
 
-  .searchbox{display:flex;align-items:center;gap:7px;border:1px solid var(--border2);border-radius:9px;padding:0 10px;color:var(--ink2);}
-  .searchbox input{border:none;outline:none;padding:8px 0;font-size:13px;background:transparent;width:170px;}
+  .searchbox{display:flex;align-items:center;gap:7px;border:1px solid var(--border2);border-radius:9px;padding:0 10px;color:var(--ink2);flex:1 1 150px;min-width:0;}
+  .searchbox input{border:none;outline:none;padding:8px 0;font-size:13px;background:transparent;width:100%;min-width:0;}
   .chip{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px;}
   .chip.u{background:var(--accent-weak);color:var(--accent2);} .chip.s{background:var(--surface2);color:var(--ink2);}
 
@@ -264,6 +311,10 @@
 }
 @media(max-width:680px){
   .main{padding:14px 12px;}
+  .page{padding:16px 14px;}
+  .hero{padding:18px;gap:13px;border-radius:14px;}
+  .hero h1{font-size:clamp(18px,5.4vw,23px);}
+  .head h2,.disp{font-size:clamp(18px,5.2vw,21px);}
   .panel:has(.htable){overflow-x:auto;-webkit-overflow-scrolling:touch;}
   .htable{min-width:540px;}
   .cards{grid-template-columns:1fr;}
@@ -289,3 +340,43 @@
   /* başlık satırını öne çıkar */
   .hane-table tr td:first-child b{font-size:15px;}
 }
+
+/* ===================== Native uygulama hissi (PWA / standalone) ===================== */
+
+/* Çentik / home-bar güvenli alanları — tüm sabit barlar ve saha kabuğu */
+.saha-bar{padding-top:calc(12px + env(safe-area-inset-top));}
+.app.saha .main{padding-bottom:calc(16px + env(safe-area-inset-bottom));}
+
+/* Arayüz öğelerinde metin seçimini kapat (yanlışlıkla highlight = web hissi) */
+.mobil-bar,.tabbar,.saha-bar,.sidebar,.brand,.nav,.hero,.tag,.badge,.kodtag,
+.chip,.seg,.mah-tabs,.card-t,.tip-tag,.rolepill,.crumb,.stat-lbl,.who,
+.btn,.vbtn,.nav-sec,.rozet,.tabbar button{
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+}
+/* Veri/tablo/metin alanlarında seçim açık kalsın */
+.htable,.hane-table,input,textarea,.hane-not{-webkit-user-select:text;user-select:text;}
+
+/* Dokunma gecikmesini ve çift-dokun zoom'unu kaldır */
+a,button,.nav,.card,.chip,.vbtn,.aday,.site-kart,.tabbar button,.mt{touch-action:manipulation;}
+
+/* Standalone modda gövde taşmasını ve lastik-bant kaymasını engelle */
+@media(display-mode:standalone){
+  html,body{overscroll-behavior:none;}
+}
+
+/* ===== Mobil: iOS odak-zoom'unu durdur (form alanları en az 16px olmalı) ===== */
+@media(max-width:900px){
+  input,select,textarea,.inp,.inp2,.sel,.searchbox input,.ara-kutu input,
+  .sokak-sel,.sd-atama select,.onay-sec-row select{font-size:16px!important;}
+
+  /* Dokunma hedefleri rahat olsun */
+  .nav{padding:11px 12px;font-size:14.5px;}
+  .btn{padding:10px 14px;}
+  .vbtn{padding:8px 13px;}
+
+  /* Modal/tam ekran açılır pencere safe-area ile sınırlı kalsın */
+  .login-wrap{padding:24px max(16px,env(safe-area-inset-left)) calc(24px + env(safe-area-inset-bottom));}
+}
+
+/* Tablo yatay kaydırması parmakla yumuşak olsun (mobil kart düzenine düşmeyenler) */
+.panel{ -webkit-overflow-scrolling:touch; }

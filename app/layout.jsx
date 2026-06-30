@@ -6,6 +6,8 @@ export const metadata = {
   title: "Saha Teşkilatı Yönetim Sistemi",
   description: "İstanbul İl Başkanlığı saha organizasyon takip",
   applicationName: "Saha Takip",
+  manifest: "/manifest.webmanifest",
+  formatDetection: { telephone: false, date: false, address: false, email: false },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -22,6 +24,7 @@ export const viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
 };
 

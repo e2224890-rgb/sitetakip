@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../lib/supabase";
-import { LayoutDashboard, Building2, Compass, Users, ShieldCheck, BadgeCheck, Boxes, FileText, ChevronRight, LogOut, Map, MapPin } from "lucide-react";
+import { LayoutDashboard, Building2, Compass, Users, ShieldCheck, BadgeCheck, Boxes, FileText, ChevronRight, LogOut, Map, MapPin, Menu } from "lucide-react";
 import Bolgeler from "./Bolgeler";
 import Gezgin from "./Gezgin";
 import GrupDetay from "./GrupDetay";
@@ -24,6 +24,13 @@ export default function Yonetim({ session, profil }) {
   const [mahalleTab, setMahalleTab] = useState("sokaklar"); // sokak-tipi mahalle içinde: sokaklar | siteler
   const [mahalleSiteSay, setMahalleSiteSay] = useState(0);  // bu mahalledeki site_kayit sayısı
   const [mahalleBolgeSay, setMahalleBolgeSay] = useState(0);// site-tipi mahalledeki sokak-bölge sayısı
+  const [drawer, setDrawer] = useState(false);              // mobil yan menü açık mı
+
+  // Çekmece açıkken arka planın kaymasını kilitle
+  useEffect(() => {
+    document.body.style.overflow = drawer ? "hidden" : "";
+    return () => { document.body.style.overflow = ""; };
+  }, [drawer]);
 
   // Seçili mahalle sokak-tipiyse, içinde gizli site var mı bak
   useEffect(() => {
@@ -89,20 +96,31 @@ export default function Yonetim({ session, profil }) {
     const ids = [...new Set((mahalleler || []).map((m) => m.ilce_id))];
     return ids.map((id) => ilceList.find((i) => i.id === id) || { id, ad: "İlçe" });
   }, [mahalleler, ilceList]);
-  function ilceSec(id) { setSecIlceId(id); setSecMahalle(null); setSecBolge(null); setSecGrup(null); }
+  function ilceSec(id) { setSecIlceId(id); setSecMahalle(null); setSecBolge(null); setSecGrup(null); setDrawer(false); }
 
-  function git(s) { setSayfa(s); setSecMahalle(null); setSecBolge(null); setSecGrup(null); }
+  function git(s) { setSayfa(s); setSecMahalle(null); setSecBolge(null); setSecGrup(null); setDrawer(false); }
 
   const NavBtn = ({ id, ic, label, badge, pasif }) => (
     <button className={"nav" + (sayfa === id ? " on" : "") + (pasif ? " pasif" : "")}
-      onClick={() => { if (pasif) { setSayfa("yakinda"); return; } git(id); }}>
+      onClick={() => { if (pasif) { setSayfa("yakinda"); setDrawer(false); return; } git(id); }}>
       {ic} <span>{label}</span>{badge != null && <em className="badge">{badge}</em>}
     </button>
   );
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      <header className="mobil-bar">
+        <button className="ham" onClick={() => setDrawer(true)} aria-label="Menü"><Menu size={20} /></button>
+        <div className="mb-logo"><Building2 size={17} /></div>
+        <div>
+          <div className="mb-t">Saha Takip</div>
+          <div className="mb-s">{ilceYon ? "İlçe Yönetimi" : (secIlce.ad || "").toLocaleUpperCase("tr")}</div>
+        </div>
+        {!ilceYon && <span className="mb-badge">39 ilçe</span>}
+      </header>
+      <div className={"drawer-overlay" + (drawer ? " open" : "")} onClick={() => setDrawer(false)} aria-hidden />
+
+      <aside className={"sidebar" + (drawer ? " open" : "")}>
         <div className="brand"><div className="logo"><Building2 size={20} /></div>
           <div><div className="brand-t">Site Sokak Sorumlusu Takip Sistemi</div>
             <div className="brand-s">İSTANBUL İL BAŞKANLIĞI</div></div></div>
@@ -138,7 +156,7 @@ export default function Yonetim({ session, profil }) {
         {sayfa === "gezgin" && (
           <div className="page">
             {!ilceYon && veriIlceleri.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 13, color: "var(--ink2)", fontWeight: 600 }}>İlçe:</span>
                 <select className="sel" value={secIlceId || ""} onChange={(e) => ilceSec(e.target.value)} style={{ minWidth: 180, fontWeight: 600 }}>
                   {veriIlceleri.map((i) => <option key={i.id} value={i.id}>{i.ad}</option>)}
@@ -199,6 +217,23 @@ export default function Yonetim({ session, profil }) {
             <h3>Bu modül yakında</h3><p>Bu bölüm sonraki aşamada eklenecek.</p></div></div>
         )}
       </main>
+
+      <nav className="tabbar">
+        {!ilceYon && (
+          <button className={sayfa === "il" ? "on" : ""} onClick={() => git("il")}>
+            <LayoutDashboard size={21} /><span>İl Geneli</span>
+          </button>
+        )}
+        <button className={sayfa === "gezgin" ? "on" : ""} onClick={() => git("gezgin")}>
+          <Compass size={21} /><span>Gezgin</span>
+        </button>
+        <button className={sayfa === "sorumlular" ? "on" : ""} onClick={() => git("sorumlular")}>
+          <Users size={21} /><span>Sorumlular</span>
+        </button>
+        <button className={sayfa === "siteler" ? "on" : ""} onClick={() => git("siteler")}>
+          <MapPin size={21} /><span>Siteler</span>
+        </button>
+      </nav>
     </div>
   );
 }
