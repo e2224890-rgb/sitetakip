@@ -4,6 +4,7 @@
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
   html,body{width:100%;max-width:100%;overflow-x:hidden;overscroll-behavior-y:contain;
     -webkit-text-size-adjust:100%;text-size-adjust:100%;}
+  @supports(overflow:clip){html,body{overflow-x:clip;}}
   img,svg,canvas,video{max-width:100%;}
   button{-webkit-tap-highlight-color:transparent;}
   @supports(min-height:100dvh){.kok,.login-wrap,.app,.main{min-height:100dvh;}}
