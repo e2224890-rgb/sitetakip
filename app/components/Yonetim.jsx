@@ -55,13 +55,16 @@ export default function Yonetim({ session, profil }) {
     (async () => {
       let q = supabase.from("mv_mahalle_ozet").select("mahalle_id, ilce_id, ad, prefix, tip, hane, kisi, uye, erkek, kadin, y1824, y2534, y3544, y4554, y5564, y65");
       if (ilceYon && profil.ilce_id) q = q.eq("ilce_id", profil.ilce_id);
-      const { data } = await q;
-      const ml = (data || []).filter((m) => m.kisi > 0).sort((a, b) => b.kisi - a.kisi);
+      // 3 sorgu tek turda paralel — ilk açılış hızlanır
+      const [ozetR, bolgeR, ilceR] = await Promise.all([
+        q,
+        supabase.from("bolge").select("*", { count: "exact", head: true }),
+        supabase.from("ilce").select("id, ad, prefix").order("ad"),
+      ]);
+      const ml = (ozetR.data || []).filter((m) => m.kisi > 0).sort((a, b) => b.kisi - a.kisi);
       setMahalleler(ml);
-      const { count } = await supabase.from("bolge").select("*", { count: "exact", head: true });
-      setIlBolgeToplam(count || 0);
-      const { data: ilceler } = await supabase.from("ilce").select("id, ad, prefix").order("ad");
-      setIlceList(ilceler || []);
+      setIlBolgeToplam(bolgeR.count || 0);
+      setIlceList(ilceR.data || []);
       const veriIlce = [...new Set(ml.map((m) => m.ilce_id))];
       setSecIlceId((cur) => cur || (ilceYon ? profil.ilce_id : (veriIlce[0] || null)));
     })();
