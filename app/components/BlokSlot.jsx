@@ -5,6 +5,7 @@ import { blokParts } from "../../lib/format";
 
 export default function BlokSlot({ site, blok, rol, rolEtiket, mevcut, digerHesaplar, onChanged }) {
   const [ad, setAd] = useState(""); const [eposta, setEposta] = useState(""); const [sifre, setSifre] = useState("");
+  const [telefon, setTelefon] = useState(""); const [meslek, setMeslek] = useState(""); const [tc, setTc] = useState("");
   const [durum, setDurum] = useState(null); const [mesgul, setMesgul] = useState(false);
   async function olustur() {
     setDurum(null);
@@ -15,12 +16,12 @@ export default function BlokSlot({ site, blok, rol, rolEtiket, mevcut, digerHesa
       const { data: { session } } = await supabase.auth.getSession();
       const r = await fetch("/api/hesap-ekle", {
         method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
-        body: JSON.stringify({ ad_soyad: ad || eposta, eposta, sifre, rol, site_kayit_id: site.id, blok }),
+        body: JSON.stringify({ ad_soyad: ad || eposta, eposta, sifre, rol, site_kayit_id: site.id, blok, telefon, meslek, tc_no: tc }),
       });
       const txt = await r.text();
       let j = null; try { j = JSON.parse(txt); } catch (_) { }
       if (!r.ok || !j) setDurum({ t: "e", m: j?.error || `Sunucu hatası (${r.status}). "/api/hesap-ekle" bulunamadı ya da derlenemedi — route.js dosyasını ve dev sunucusunu kontrol et.` });
-      else { setEposta(""); setSifre(""); setAd(""); onChanged(); }
+      else { setEposta(""); setSifre(""); setAd(""); setTelefon(""); setMeslek(""); setTc(""); onChanged(); }
     } catch (e) { setDurum({ t: "e", m: String(e) }); }
     setMesgul(false);
   }
@@ -66,6 +67,11 @@ export default function BlokSlot({ site, blok, rol, rolEtiket, mevcut, digerHesa
         <input placeholder="E-posta" value={eposta} onChange={(e) => setEposta(e.target.value)} style={{ ...inp, flex: 1, minWidth: 150 }} />
         <input placeholder="Şifre (min 6)" type="text" value={sifre} onChange={(e) => setSifre(e.target.value)} style={{ ...inp, width: 120 }} />
         <button onClick={olustur} disabled={mesgul} style={{ padding: "6px 12px", background: mesgul ? "#93c5fd" : "#2563eb", color: "#fff", border: "none", borderRadius: 6, fontSize: 13, cursor: mesgul ? "default" : "pointer" }}>{mesgul ? "..." : "Hesap aç"}</button>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6, marginLeft: 122 }}>
+        <input placeholder="Telefon" value={telefon} onChange={(e) => setTelefon(e.target.value)} style={{ ...inp, width: 150 }} />
+        <input placeholder="Meslek" value={meslek} onChange={(e) => setMeslek(e.target.value)} style={{ ...inp, width: 150 }} />
+        <input placeholder="TC Kimlik" value={tc} onChange={(e) => setTc(e.target.value)} style={{ ...inp, width: 150 }} />
       </div>
       {(digerHesaplar || []).length > 0 && (
         <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, marginLeft: 122 }}>

@@ -46,16 +46,15 @@ export async function POST(req) {
     let hedefIlce = caller.rol === "ilce_yonetimi" ? caller.ilce_id : (ilce_id || null);
     if (!hedefIlce) { const { data: bsk } = await a.from("ilce").select("id").eq("prefix", "BSK").single(); hedefIlce = bsk?.id || null; }
 
-    const guncelle = { ad_soyad: ad_soyad || null, rol: gecerliRol, ilce_id: hedefIlce, aktif: true };
+    // İletişim bilgileri her rol için yazılır (blok sorumlusu da normal kullanıcı gibi tam bilgiyle)
+    const guncelle = {
+      ad_soyad: ad_soyad || null, rol: gecerliRol, ilce_id: hedefIlce, aktif: true,
+      telefon: telefon || null, meslek: meslek || null, tc_no: tc_no || null,
+    };
     if (BLOK_ROLLER.includes(gecerliRol)) {
-      // BLOK GÖREVLİSİ: siteye ve bloğa bağla (asıl eksik olan buydu)
+      // BLOK GÖREVLİSİ: ayrıca siteye ve bloğa bağla
       guncelle.site_kayit_id = site_kayit_id || null;
       guncelle.blok = blok || null;
-    } else {
-      // Genel görevli: iletişim bilgileri
-      guncelle.telefon = telefon || null;
-      guncelle.meslek = meslek || null;
-      guncelle.tc_no = tc_no || null;
     }
 
     const { error: eP } = await a.from("profiles").update(guncelle).eq("id", uid);
