@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Sunucu tarafı: service_role burada kalır, tarayıcıya gitmez.
-// .env.local:  SUPABASE_SERVICE_ROLE=sb_secret_...   (NEXT_PUBLIC YOK!)
+// .env.local (ve Vercel env):  SUPABASE_SERVICE_ROLE=...   (NEXT_PUBLIC YOK!)
 function admin() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const svc = process.env.SUPABASE_SERVICE_ROLE;
@@ -16,6 +16,9 @@ async function yetkiVar(a, token) {
   return { id: u.user.id, rol: prof.rol, ilce_id: prof.ilce_id };
 }
 
+const BLOK_ROLLER = ["blok_sorumlu", "ana_kademe", "kadin_kollari", "genclik_kollari"];
+const GENEL_ROLLER = ["sorumlu", "koordinator", "ilce_yonetimi"];
+
 export async function POST(req) {
   try {
     const a = admin();
@@ -24,7 +27,7 @@ export async function POST(req) {
     const caller = await yetkiVar(a, token);
     if (!caller) return Response.json({ error: "Bu işlem için yetkiniz yok." }, { status: 403 });
 
-    const { ad_soyad, eposta, sifre, rol, telefon, meslek, tc_no, ilce_id } = await req.json();
+    const { ad_soyad, eposta, sifre, rol, telefon, meslek, tc_no, ilce_id, site_kayit_id, blok } = await req.json();
     if (!eposta || !sifre) return Response.json({ error: "E-posta ve şifre gerekli." }, { status: 400 });
     if (String(sifre).length < 6) return Response.json({ error: "Şifre en az 6 karakter olmalı." }, { status: 400 });
 
@@ -36,15 +39,26 @@ export async function POST(req) {
       if (!uid) return Response.json({ error: eC.message }, { status: 400 });
     } else uid = created.user.id;
 
-    const gecerliRol = ["sorumlu", "koordinator", "ilce_yonetimi"].includes(rol) ? rol : "sorumlu";
-    // İlçe başkanı yalnız kendi ilçesine ekler; il başkanlığı seçtiği ilçeye.
+    // Rol: hem genel (sorumlu/koordinator) hem blok rolleri geçerli
+    const gecerliRol = [...GENEL_ROLLER, ...BLOK_ROLLER].includes(rol) ? rol : "sorumlu";
+
+    // Hedef ilçe (blok rolleri için de kapsam kalsın diye set ediyoruz)
     let hedefIlce = caller.rol === "ilce_yonetimi" ? caller.ilce_id : (ilce_id || null);
     if (!hedefIlce) { const { data: bsk } = await a.from("ilce").select("id").eq("prefix", "BSK").single(); hedefIlce = bsk?.id || null; }
-    const { error: eP } = await a.from("profiles").update({
-      ad_soyad: ad_soyad || null, rol: gecerliRol,
-      ilce_id: hedefIlce, telefon: telefon || null, meslek: meslek || null,
-      tc_no: tc_no || null, aktif: true,
-    }).eq("id", uid);
+
+    const guncelle = { ad_soyad: ad_soyad || null, rol: gecerliRol, ilce_id: hedefIlce, aktif: true };
+    if (BLOK_ROLLER.includes(gecerliRol)) {
+      // BLOK GÖREVLİSİ: siteye ve bloğa bağla (asıl eksik olan buydu)
+      guncelle.site_kayit_id = site_kayit_id || null;
+      guncelle.blok = blok || null;
+    } else {
+      // Genel görevli: iletişim bilgileri
+      guncelle.telefon = telefon || null;
+      guncelle.meslek = meslek || null;
+      guncelle.tc_no = tc_no || null;
+    }
+
+    const { error: eP } = await a.from("profiles").update(guncelle).eq("id", uid);
     if (eP) return Response.json({ error: eP.message }, { status: 400 });
     return Response.json({ ok: true, id: uid });
   } catch (e) {
@@ -52,7 +66,28 @@ export async function POST(req) {
   }
 }
 
-// Hesap silme: bölge atamalarını boşalt + auth kullanıcısını sil
+// Blok atamasını güncelle: var olan görevliyi başka bloğa da ekle / bloktan çıkar
+export async function PATCH(req) {
+  try {
+    const a = admin();
+    if (!a) return Response.json({ error: "Sunucuda SUPABASE_SERVICE_ROLE tanımlı değil." }, { status: 500 });
+    const token = (req.headers.get("authorization") || "").replace("Bearer ", "");
+    if (!(await yetkiVar(a, token))) return Response.json({ error: "Yetkiniz yok." }, { status: 403 });
+    const { id, blok, site_kayit_id } = await req.json();
+    if (!id) return Response.json({ error: "id gerekli." }, { status: 400 });
+    const upd = {};
+    if (blok !== undefined) upd.blok = blok || null;
+    if (site_kayit_id !== undefined) upd.site_kayit_id = site_kayit_id || null;
+    if (Object.keys(upd).length === 0) return Response.json({ error: "Güncellenecek alan yok." }, { status: 400 });
+    const { error } = await a.from("profiles").update(upd).eq("id", id);
+    if (error) return Response.json({ error: error.message }, { status: 400 });
+    return Response.json({ ok: true });
+  } catch (e) {
+    return Response.json({ error: String(e?.message || e) }, { status: 500 });
+  }
+}
+
+// Hesap silme: bölge + blok atamalarını boşalt + auth kullanıcısını sil
 export async function DELETE(req) {
   try {
     const a = admin();
