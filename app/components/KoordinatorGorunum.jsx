@@ -1,10 +1,12 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
+import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ShieldCheck, ChevronRight, LogOut, Home, Map, CheckCircle2, Crown } from "lucide-react";
 import { fmt, oran } from "../../lib/format";
-import Haneler from "./Haneler";
 import StatCard from "./StatCard";
+const Haneler = dynamic(() => import("./Haneler"), { ssr: false, loading: () => <div className="merkez">Yükleniyor…</div> });
 
 export default function KoordinatorGorunum({ session, profil }) {
   const [bolgeler, setBolgeler] = useState(null);
@@ -12,33 +14,34 @@ export default function KoordinatorGorunum({ session, profil }) {
   const [secBolge, setSecBolge] = useState(null);
 
   useEffect(() => {
+    const snapAnahtar = `koord:${session.user.id}`;
+    // Son bilinen liste ANINDA gelsin; sayımlar arka planda tazelenir
+    const snap = cacheOku(snapAnahtar);
+    if (snap) { setBolgeler(snap.bolgeler || []); setMahAd(snap.mahAd || ""); }
     (async () => {
-      const { data: bs } = await supabase.from("bolge")
-        .select("id, kod, kapsam, mahalle_id, sorumlu_id").eq("koordinator_id", session.user.id).order("kod");
+      // TEK sorgu: bölgeler + hane/kişi/üye/ziyaret sayıları view'dan hazır gelir
+      // (eski N×4 count deseni SQL 17 / vw_bolge_ozet ile kaldırıldı)
+      const { data: bs } = await supabase.from("vw_bolge_ozet")
+        .select("id, kod, kapsam, mahalle_id, sorumlu_id, hane, kisi, uye, ziyaret")
+        .eq("koordinator_id", session.user.id).order("kod");
       const liste = bs || [];
-      // mahalle adı
-      if (liste.length) {
-        const { data: m } = await supabase.from("mahalle").select("ad").eq("id", liste[0].mahalle_id).single();
-        setMahAd(m?.ad || "");
-      }
-      // sorumlu adları
+      // mahalle adı + sorumlu adları paralel
       const sIds = [...new Set(liste.map((b) => b.sorumlu_id).filter(Boolean))];
+      const [mR, pR] = await Promise.all([
+        liste.length
+          ? supabase.from("mahalle").select("ad").eq("id", liste[0].mahalle_id).single()
+          : Promise.resolve({ data: null }),
+        sIds.length
+          ? supabase.from("profiles").select("id, ad_soyad, eposta").in("id", sIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+      const mahalleAd = mR.data?.ad || "";
+      setMahAd(mahalleAd);
       let adMap = {};
-      if (sIds.length) {
-        const { data: ps } = await supabase.from("profiles").select("id, ad_soyad, eposta").in("id", sIds);
-        (ps || []).forEach((p) => adMap[p.id] = p.ad_soyad || p.eposta);
-      }
-      // her bölge için sayımlar
-      const zenginler = await Promise.all(liste.map(async (b) => {
-        const [h, k, u, z] = await Promise.all([
-          supabase.from("hane").select("*", { count: "exact", head: true }).eq("bolge_id", b.id),
-          supabase.from("kisi").select("*", { count: "exact", head: true }).eq("bolge_id", b.id),
-          supabase.from("kisi").select("*", { count: "exact", head: true }).eq("bolge_id", b.id).eq("uye", true),
-          supabase.from("ziyaret").select("*", { count: "exact", head: true }).eq("bolge_id", b.id).eq("durum", "ziyaret_edildi"),
-        ]);
-        return { ...b, sorumluAd: adMap[b.sorumlu_id] || "—", hane: h.count || 0, kisi: k.count || 0, uye: u.count || 0, ziyaret: z.count || 0 };
-      }));
+      (pR.data || []).forEach((p) => adMap[p.id] = p.ad_soyad || p.eposta);
+      const zenginler = liste.map((b) => ({ ...b, sorumluAd: adMap[b.sorumlu_id] || "—" }));
       setBolgeler(zenginler);
+      cacheYaz(snapAnahtar, { bolgeler: zenginler, mahAd: mahalleAd });
     })();
   }, [session.user.id]);
 

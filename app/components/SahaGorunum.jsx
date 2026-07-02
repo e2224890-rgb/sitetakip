@@ -1,20 +1,29 @@
 "use client";
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
+import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ChevronRight, LogOut, UserCheck, Crown } from "lucide-react";
-import Haneler from "./Haneler";
+const Haneler = dynamic(() => import("./Haneler"), { ssr: false, loading: () => <div className="merkez">Yükleniyor…</div> });
 
 export default function SahaGorunum({ session, profil, alan, baslik }) {
   const [bolgeler, setBolgeler] = useState(null);
   const [secBolge, setSecBolge] = useState(null);
 
   useEffect(() => {
+    const snapAnahtar = `saha:${alan}:${session.user.id}`;
+    const uygula = (liste) => {
+      setBolgeler(liste);
+      if (liste.length === 1) setSecBolge((cur) => cur ?? liste[0]); // kullanıcı gezinmesini ezme
+    };
+    const snap = cacheOku(snapAnahtar);
+    if (snap) uygula(snap); // son bilinen bölgeler ANINDA
     (async () => {
       const { data } = await supabase.from("bolge")
         .select("id, kod, kapsam, mahalle_id").eq(alan, session.user.id).order("kod");
       const liste = data || [];
-      setBolgeler(liste);
-      if (liste.length === 1) setSecBolge(liste[0]);
+      uygula(liste);
+      cacheYaz(snapAnahtar, liste);
     })();
   }, []);
 

@@ -1,15 +1,20 @@
 "use client";
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
+import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ChevronRight, LogOut, UserCheck } from "lucide-react";
 import { fmt } from "../../lib/format";
-import GrupDetay from "./GrupDetay";
+const GrupDetay = dynamic(() => import("./GrupDetay"), { ssr: false, loading: () => <div className="merkez">Yükleniyor…</div> });
 
 export default function GrupBaskaniGorunum({ session, profil }) {
   const [gruplar, setGruplar] = useState(null);
   const [sec, setSec] = useState(null);
 
   useEffect(() => {
+    const snapAnahtar = `grupbaskan:${session.user.id}`;
+    const snap = cacheOku(snapAnahtar);
+    if (snap) setGruplar(snap); // son bilinen liste ANINDA
     (async () => {
       const { data: gs } = await supabase.from("sokak_grup")
         .select("id, no, memleketler, baskan_ad, baskan_tel, baskan_memleket, baskan_id, bolge_id")
@@ -33,6 +38,7 @@ export default function GrupBaskaniGorunum({ session, profil }) {
         return { ...g, bolge, hane: haneIds.length, ziyaret };
       }));
       setGruplar(zengin);
+      cacheYaz(snapAnahtar, zengin);
     })();
   }, [session.user.id]);
 

@@ -1,14 +1,19 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
+import { cacheOku, cacheYaz } from "../../lib/cache";
 import { LayoutDashboard, Building2, Compass, Users, ShieldCheck, BadgeCheck, Boxes, FileText, ChevronRight, LogOut, Map, MapPin, Menu } from "lucide-react";
-import Bolgeler from "./Bolgeler";
-import Gezgin from "./Gezgin";
-import GrupDetay from "./GrupDetay";
-import Haneler from "./Haneler";
-import IlGeneli from "./IlGeneli";
-import Siteler from "./Siteler";
-import Sorumlular from "./Sorumlular";
+// Alt sayfalar lazy -> recharts içeren ağır bileşenler ancak açıldıklarında iner
+const Yukleniyor = () => <div className="merkez">Yükleniyor…</div>;
+const dyn = (yol) => dynamic(yol, { ssr: false, loading: Yukleniyor });
+const Bolgeler = dyn(() => import("./Bolgeler"));
+const Gezgin = dyn(() => import("./Gezgin"));
+const GrupDetay = dyn(() => import("./GrupDetay"));
+const Haneler = dyn(() => import("./Haneler"));
+const IlGeneli = dyn(() => import("./IlGeneli"));
+const Siteler = dyn(() => import("./Siteler"));
+const Sorumlular = dyn(() => import("./Sorumlular"));
 
 export default function Yonetim({ session, profil }) {
   const ilceYon = profil.rol === "ilce_yonetimi";
@@ -52,6 +57,20 @@ export default function Yonetim({ session, profil }) {
   }, [secMahalle?.id]);
 
   useEffect(() => {
+    const snapAnahtar = `yonetim:${session.user.id}`;
+    const uygula = (v, cacheYazilsin) => {
+      const ml = (v.mahalleler || []).filter((m) => m.kisi > 0).sort((a, b) => b.kisi - a.kisi);
+      setMahalleler(ml);
+      setIlBolgeToplam(v.ilBolgeToplam || 0);
+      setIlceList(v.ilceList || []);
+      const veriIlce = [...new Set(ml.map((m) => m.ilce_id))];
+      setSecIlceId((cur) => cur || (ilceYon ? profil.ilce_id : (veriIlce[0] || null)));
+      if (cacheYazilsin) cacheYaz(snapAnahtar, { mahalleler: ml, ilBolgeToplam: v.ilBolgeToplam || 0, ilceList: v.ilceList || [] });
+    };
+    // 1) Son bilinen veriyi ANINDA bas -> dashboard beklemeden dolu açılır
+    const snap = cacheOku(snapAnahtar);
+    if (snap) uygula(snap, false);
+    // 2) Arka planda tazele
     (async () => {
       let q = supabase.from("mv_mahalle_ozet").select("mahalle_id, ilce_id, ad, prefix, tip, hane, kisi, uye, erkek, kadin, y1824, y2534, y3544, y4554, y5564, y65");
       if (ilceYon && profil.ilce_id) q = q.eq("ilce_id", profil.ilce_id);
@@ -61,12 +80,7 @@ export default function Yonetim({ session, profil }) {
         supabase.from("bolge").select("*", { count: "exact", head: true }),
         supabase.from("ilce").select("id, ad, prefix").order("ad"),
       ]);
-      const ml = (ozetR.data || []).filter((m) => m.kisi > 0).sort((a, b) => b.kisi - a.kisi);
-      setMahalleler(ml);
-      setIlBolgeToplam(bolgeR.count || 0);
-      setIlceList(ilceR.data || []);
-      const veriIlce = [...new Set(ml.map((m) => m.ilce_id))];
-      setSecIlceId((cur) => cur || (ilceYon ? profil.ilce_id : (veriIlce[0] || null)));
+      uygula({ mahalleler: ozetR.data || [], ilBolgeToplam: bolgeR.count || 0, ilceList: ilceR.data || [] }, true);
     })();
   }, []);
 
