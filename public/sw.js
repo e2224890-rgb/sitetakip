@@ -1,9 +1,14 @@
-// Site Sokak Takip — Service Worker (otomatik güncellenen)
-// Strateji: sayfa gezinmesi DAİMA network-first (her açılışta taze HTML),
-// /_next/static/* hash'li dosyalar cache-first (kalıcı), Supabase/API asla cache'lenmez.
-// Cache adı her sürümde artırılır -> eski cache temizlenir -> güncel sürüm garanti gelir.
-const CACHE = "sst-v3";
-const SHELL = ["/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+// Site Sokak Takip — Service Worker
+// Strateji (v4):
+//   - Sayfa gezinmesi: STALE-WHILE-REVALIDATE -> cache'teki HTML ANINDA gösterilir,
+//     arka planda taze sürüm indirilip cache güncellenir. Açılış ağ hızından bağımsız olur.
+//   - /_next/static/* hash'li dosyalar: cache-first (içerik değişmez).
+//   - Supabase ve /api: ASLA cache'lenmez.
+// GÜNCELLİK GARANTİSİ: Her deploy'da CACHE sürümünü artırın (sst-v4 -> sst-v5).
+// Yeni SW aktive olunca eski cache silinir + PWARegister sayfayı bir kez yeniler
+// -> kullanıcı en geç bir sonraki öne gelişte yeni sürümü alır.
+const CACHE = "sst-v4";
+const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -33,13 +38,30 @@ self.addEventListener("fetch", (e) => {
   if (url.pathname.startsWith("/api/") || url.hostname.endsWith(".supabase.co")) return;
   if (url.origin !== self.location.origin) return;
 
-  // Sayfa gezinmesi (HTML): network-first -> her açılışta en güncel arayüz
+  // Sayfa gezinmesi (HTML): stale-while-revalidate
+  // 1) Cache'te varsa ANINDA onu ver (açılış gecikmesi sıfıra iner)
+  // 2) Aynı anda ağdan tazesini çek, cache'i güncelle (bir sonraki açılış taze olur)
   if (request.mode === "navigate") {
-    e.respondWith(
-      fetch(request)
-        .then((res) => { caches.open(CACHE).then((c) => c.put(request, res.clone())); return res; })
-        .catch(() => caches.match(request).then((r) => r || caches.match("/")))
-    );
+    e.respondWith((async () => {
+      const cached = (await caches.match(request)) || (await caches.match("/"));
+      const agIstegi = fetch(request)
+        .then((res) => {
+          if (res && res.ok) {
+            const kopya = res.clone();
+            caches.open(CACHE).then((c) => c.put(request, kopya));
+          }
+          return res;
+        })
+        .catch(() => null);
+      if (cached) {
+        e.waitUntil(agIstegi); // arka plan tazelemesi SW kapanmadan tamamlansın
+        return cached;
+      }
+      const taze = await agIstegi;
+      return taze || new Response("Çevrimdışı — bağlantı kurulamadı.", {
+        status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    })());
     return;
   }
 
