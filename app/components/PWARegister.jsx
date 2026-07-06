@@ -5,6 +5,17 @@ export default function PWARegister() {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
 
+    // GELİŞTİRMEDE (localhost) service worker KAYDETME.
+    // Sebep: dev'de SW eski bundle'ı cache'leyip F5'te bayat kod servis ediyor,
+    // cache temizlenince de sayfa "Yükleniyor…"da takılıyor.
+    // Ayrıca daha önce dev'de kaydolmuş SW'yi ve cache'leri otomatik temizle -> kendini onarır.
+    const dev = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    if (dev) {
+      navigator.serviceWorker.getRegistrations?.().then((rs) => rs.forEach((r) => r.unregister()));
+      if (window.caches?.keys) caches.keys().then((ks) => ks.forEach((k) => caches.delete(k)));
+      return;
+    }
+
     let reloaded = false;
     // Yeni service worker devralınca sayfayı bir kez yenile -> güncel arayüz anında gelir
     navigator.serviceWorker.addEventListener("controllerchange", () => {

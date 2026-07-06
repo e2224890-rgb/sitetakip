@@ -1,26 +1,147 @@
 "use client";
-import { Building2, Compass, Users, ShieldCheck, ChevronRight, Home, Map, TrendingUp } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { supabase } from "../../lib/supabase";
+import { Building2, Compass, Users, UsersRound, ShieldCheck, ChevronRight, Home, Map, TrendingUp } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { fmt, oran } from "../../lib/format";
+import { fmt, oran, NUF_RENK } from "../../lib/format";
+import { cacheOku, cacheYaz } from "../../lib/cache";
 import StatCard from "./StatCard";
 
+// İlçe toplam nüfusu (seçmenden bağımsız, resmî/tahmini nüfus). İleride başka ilçe eklenince buraya yazılır.
+const ILCE_NUFUS = { "Başakşehir": 536797 };
+
 export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec }) {
+  // İlçe geneli nüfus (memleket) il dağılımı — ilçenin tüm mahallelerinden toplanır
+  const [nufIl, setNufIl] = useState(null);
+  const [nufHata, setNufHata] = useState(null);
+  const [digerAcik, setDigerAcik] = useState(false);
+  // Recharts ResponsiveContainer, hard-refresh'te kabı 0px ölçüp boş çizebiliyor;
+  // mount'tan sonra çizince kap gerçek boyutuyla ölçülür ve chart kaybolmaz.
+  const [hazir, setHazir] = useState(false);
+  useEffect(() => { setHazir(true); }, []);
+  const mahIdKey = (mahalleler || []).map((m) => m.mahalle_id).join(",");
+  useEffect(() => {
+    setDigerAcik(false);
+    const ids = (mahalleler || []).map((m) => m.mahalle_id).filter(Boolean);
+    // mahalleler henüz gelmediyse: nufIl'i SIFIRLAMA (son iyi/cache veriyi koru) — F5'te panel kaybolmasın
+    if (!ids.length) return;
+    const ck = "nufil:" + mahIdKey;
+    const snap = cacheOku(ck);
+    if (snap && snap.length) { setNufIl(snap); setNufHata(null); } // son bilinen ANINDA (stale-while-revalidate)
+    let iptal = false;
+    (async () => {
+      const { data, error } = await supabase.from("mv_mahalle_nufus_il")
+        .select("nufus_il, kisi").in("mahalle_id", ids);
+      if (iptal) return;
+      if (error) { setNufHata(error.message || String(error)); if (!snap) setNufIl([]); return; }
+      const m = {};
+      (data || []).forEach((r) => { const il = (r.nufus_il || "").trim() || "Bilinmiyor"; m[il] = (m[il] || 0) + (r.kisi || 0); });
+      const arr = Object.entries(m).map(([ad, deger]) => ({ ad, deger })).sort((a, b) => b.deger - a.deger);
+      setNufHata(null);
+      setNufIl(arr);
+      if (arr.length) cacheYaz(ck, arr);
+    })();
+    return () => { iptal = true; };
+  }, [mahIdKey]);
+
+  // Bölge kartı hover -> bölge/grup mantığı (253 bölge, 549 grup, kaçı bölündü, sokak sayısı)
+  const [bolgeBilgi, setBolgeBilgi] = useState(null);
+  const [bolgeHover, setBolgeHover] = useState(false);
+  useEffect(() => {
+    const ids = (mahalleler || []).map((m) => m.mahalle_id).filter(Boolean);
+    if (!ids.length) return;
+    const ck = "bolgebilgi:" + mahIdKey;
+    const snap = cacheOku(ck);
+    if (snap) setBolgeBilgi(snap);
+    let iptal = false;
+    (async () => {
+      const { data: bs } = await supabase.from("bolge").select("id").in("mahalle_id", ids);
+      const bIds = (bs || []).map((b) => b.id);
+      // Hangi bölgelerde GERÇEKTEN kişi var? kisi -> hane -> bolge (site haneleri hariç)
+      const [skR, sgR, hkR] = await Promise.all([
+        supabase.from("sokak").select("*", { count: "exact", head: true }).in("mahalle_id", ids),
+        bIds.length ? supabase.from("sokak_grup").select("bolge_id").in("bolge_id", bIds) : Promise.resolve({ data: [] }),
+        bIds.length ? supabase.from("hane").select("bolge_id, kisi(id)").is("site_kayit_id", null).not("bolge_id", "is", null).in("bolge_id", bIds) : Promise.resolve({ data: [] }),
+      ]);
+      if (iptal) return;
+      const gruplar = sgR.data || [];
+      const grupluSet = new Set(gruplar.map((g) => g.bolge_id));        // grubu olan bölgeler
+      // kişili bölge = içinde en az 1 kişi olan hane bulunan bölge
+      const doluSet = new Set();
+      (hkR.data || []).forEach((h) => { if (h.kisi && h.kisi.length) doluSet.add(h.bolge_id); });
+      // Gerçek bekleyen iş = kişili ama grupsuz bölgeler
+      let bekleyen = 0; doluSet.forEach((id) => { if (!grupluSet.has(id)) bekleyen++; });
+      const bilgi = {
+        sokak: skR.count || 0,
+        grup: gruplar.length,
+        bolunmus: grupluSet.size,
+        bolgeTop: bIds.length,
+        dolu: doluSet.size,
+        bekleyen,
+      };
+      setBolgeBilgi(bilgi);
+      cacheYaz(ck, bilgi);
+    })();
+    return () => { iptal = true; };
+  }, [mahIdKey]);
+
+  const nufDag = useMemo(() => {
+    const arr = nufIl || [];
+    const toplamK = arr.reduce((a, x) => a + x.deger, 0);
+    const N = 10;
+    const top = arr.slice(0, N);
+    const kalanArr = arr.slice(N);
+    const kalan = kalanArr.reduce((a, x) => a + x.deger, 0);
+    if (kalan > 0) top.push({ ad: "Diğer", deger: kalan, detay: kalanArr });
+    return { arr: top, toplam: toplamK, ilSay: arr.length };
+  }, [nufIl]);
+
   if (mahalleler === null) return <div className="merkez">Yükleniyor…</div>;
   const uyeOran = oran(toplam.uye, toplam.kisi);
+  // Bölge = sokak-tipi birim (site haneleri bölgeye dahil değil). Gerçek hane/bölge ortalaması:
+  const sokakHane = (mahalleler || []).filter((m) => m.tip === "sokak").reduce((a, m) => a + (m.hane || 0), 0);
+  const sokakKisi = (mahalleler || []).filter((m) => m.tip === "sokak").reduce((a, m) => a + (m.kisi || 0), 0);
+  const haneBolgeOrt = bolgeToplam ? Math.round(sokakHane / bolgeToplam) : 0;
+  const kisiBolgeOrt = bolgeToplam ? Math.round(sokakKisi / bolgeToplam) : 0;
+  const grupKisiOrt = bolgeBilgi?.grup ? Math.round(sokakKisi / bolgeBilgi.grup) : 0;
   const pasta = [
     { ad: "Üye", deger: toplam.uye, renk: "var(--accent)" },
     { ad: "Diğer", deger: Math.max(0, toplam.kisi - toplam.uye), renk: "#e7e9ed" },
   ];
   return (
     <>
-      <div className="head"><div><h2 className="disp">{ilceAd || "Başakşehir"} · Teşkilat Gezgini</h2>
+      <div className="head"><div><h2 className="disp">{ilceAd || "Başakşehir"} · İlçe Teşkilatı</h2>
         <div className="sub">{mahalleler.length} mahalle · {fmt(bolgeToplam)} bölge</div></div>
         <span className="tag"><Compass size={13} /> {ilceAd || "Aktif Saha"}</span></div>
-      <div className="grid-stats">
-        <StatCard ic={<Users size={15} />} lbl="Toplam Kişi" num={fmt(toplam.kisi)} meta="seçmen kaydı" />
+      <div className="grid-stats" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+        {ILCE_NUFUS[ilceAd || "Başakşehir"] != null &&
+          <StatCard ic={<UsersRound size={15} />} lbl="Toplam Nüfus" num={fmt(ILCE_NUFUS[ilceAd || "Başakşehir"])} meta="2025 nüfusu" renk="#7c3aed" />}
+        <StatCard ic={<Users size={15} />} lbl="Toplam Seçmen" num={fmt(toplam.kisi)} meta="seçmen kaydı" />
         <StatCard ic={<Home size={15} />} lbl="Hane" num={fmt(toplam.hane)} meta="kayıtlı hane" renk="#2563eb" />
         <StatCard ic={<ShieldCheck size={15} />} lbl="AK Parti Üye" num={fmt(toplam.uye)} meta={`%${uyeOran} üyelik`} renk="#16a34a" />
-        <StatCard ic={<Map size={15} />} lbl="Bölge" num={fmt(bolgeToplam)} meta="≈150 hane / bölge" renk="#9333ea" />
+        <div style={{ position: "relative" }} onMouseEnter={() => setBolgeHover(true)} onMouseLeave={() => setBolgeHover(false)}>
+          <StatCard ic={<Map size={15} />} lbl="Bölge" num={fmt(bolgeToplam)} meta={haneBolgeOrt ? `sokak · ort. ${fmt(haneBolgeOrt)} hane/bölge` : "sokak bölgeleri"} renk="#9333ea" />
+          {bolgeHover && (
+            <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 60, marginTop: 6, width: 320, maxWidth: "88vw", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 14px 40px rgba(15,23,42,.18)", padding: 14, fontSize: 12.5, color: "#334155", lineHeight: 1.55 }}>
+              <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8, color: "#6d28d9" }}>Saha Teşkilat Yapısı</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 10px" }}>
+                <span>Bölge (sokak birimi)</span><b className="mono">{fmt(bolgeToplam)}</b>
+                <span>Kayıtlı sokak</span><b className="mono">{bolgeBilgi ? fmt(bolgeBilgi.sokak) : "…"}</b>
+                <span>Saha grubu (~150 kişi)</span><b className="mono" style={{ color: "#c2410c" }}>{bolgeBilgi ? fmt(bolgeBilgi.grup) : "…"}</b>
+                <span>Gruplama bekleyen bölge</span><b className="mono" style={{ color: bolgeBilgi && bolgeBilgi.bekleyen > 0 ? "#b45309" : "#15803d" }}>{bolgeBilgi ? fmt(bolgeBilgi.bekleyen) : "…"}</b>
+                <span>Bölge başına ort. seçmen</span><b className="mono">{fmt(kisiBolgeOrt)}</b>
+                <span>Grup başına ort. seçmen</span><b className="mono">{grupKisiOrt ? fmt(grupKisiOrt) : "…"}</b>
+                <span>Bölge başına ort. hane</span><b className="mono">{fmt(haneBolgeOrt)}</b>
+              </div>
+              <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #eef2f7", color: "#64748b" }}>
+                <b style={{ color: "#c2410c" }}>Planlama birimi gruptur (~150 seçmen), bölge değildir.</b> Her saha sorumlusu bir gruptan mesuldür; bölgeler ortalama {kisiBolgeOrt ? Math.max(1, Math.round(kisiBolgeOrt / 150)) : 2} saha grubuna ayrılır.{" "}
+                {bolgeBilgi ? (bolgeBilgi.bekleyen > 0
+                  ? <span style={{ color: "#b45309" }}>{fmt(bolgeBilgi.bekleyen)} bölgenin gruplaması tamamlanmamıştır; ilgili mahallenin "Sokaklar" ekranından gruplandırınız.</span>
+                  : <span style={{ color: "#15803d", fontWeight: 600 }}>Seçmen kayıtlı tüm bölgelerin gruplaması tamamlanmıştır. ✓</span>) : ""}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       <div className="layout">
         <div className="panel">
@@ -64,18 +185,20 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
 
       <div className="demo-grid" style={{ marginTop: 15 }}>
         <div className="panel pad">
-          <div className="panel-h2"><h3>Yaş Aralığı</h3><span className="dim">{fmt(toplam.erkek + toplam.kadin)} kişi</span></div>
-          <ResponsiveContainer width="100%" height={210}>
-            <BarChart data={toplam.yasArr} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
-              <XAxis dataKey="ad" tick={{ fontSize: 11, fill: "#5a626c" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "#9097a0" }} axisLine={false} tickLine={false} width={48} tickFormatter={(v) => v >= 1000 ? (v / 1000).toFixed(0) + "b" : v} />
-              <Tooltip cursor={{ fill: "#0000000a" }} formatter={(v) => [fmt(v), "Kişi"]} labelFormatter={(l) => "Yaş " + l} />
-              <Bar dataKey="deger" fill="#cf5a26" radius={[5, 5, 0, 0]} maxBarSize={64} />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="panel-h2"><h3>{ilceAd || "Başakşehir"} İlçesi Yaş Aralığı Grafiği</h3><span className="dim">{fmt(toplam.erkek + toplam.kadin)} kişi</span></div>
+          {hazir ? (
+            <ResponsiveContainer width="100%" height={210}>
+              <BarChart data={toplam.yasArr} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                <XAxis dataKey="ad" tick={{ fontSize: 11, fill: "#5a626c" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "#9097a0" }} axisLine={false} tickLine={false} width={48} tickFormatter={(v) => v >= 1000 ? (v / 1000).toFixed(0) + "b" : v} />
+                <Tooltip cursor={{ fill: "#0000000a" }} formatter={(v) => [fmt(v), "Kişi"]} labelFormatter={(l) => "Yaş " + l} />
+                <Bar dataKey="deger" fill="#cf5a26" radius={[5, 5, 0, 0]} maxBarSize={64} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : <div style={{ height: 210 }} />}
         </div>
         <div className="panel pad">
-          <div className="panel-h2"><h3>Cinsiyet</h3><span className="dim">{fmt(toplam.erkek + toplam.kadin)} kişi</span></div>
+          <div className="panel-h2"><h3>{ilceAd || "Başakşehir"} İlçesi Cinsiyet Oranı</h3><span className="dim">{fmt(toplam.erkek + toplam.kadin)} kişi</span></div>
           <div className="cins">
             <div className="cins-satir"><span className="cins-ad"><span className="dot" style={{ background: "#2563eb" }} /> Erkek</span><b className="mono">{fmt(toplam.erkek)}</b></div>
             <div className="bar"><i style={{ width: `${oran(toplam.erkek, toplam.erkek + toplam.kadin)}%`, background: "#2563eb" }} /></div>
@@ -85,6 +208,69 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
           </div>
         </div>
       </div>
+
+      <div className="panel pad" style={{ marginTop: 15 }}>
+        <div className="panel-h2">
+          <h3>{ilceAd || "Başakşehir"} İlçesi Demografik Yapı · Nüfus İl Dağılımı</h3>
+          {nufDag.ilSay > 0 && <span className="dim">{fmt(nufDag.ilSay)} il · {fmt(nufDag.toplam)} kişi</span>}
+        </div>
+        {nufHata ? (
+          <div className="dim" style={{ padding: "10px 2px", color: "#b91c1c" }}>Nüfus verisi alınamadı: {nufHata}</div>
+        ) : nufIl === null ? (
+          <div className="merkez" style={{ padding: 24 }}>Yükleniyor…</div>
+        ) : nufDag.ilSay === 0 ? (
+          <div className="dim" style={{ padding: "10px 2px" }}>Bu ilçe için nüfus (memleket) verisi bulunamadı.</div>
+        ) : (
+          <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 18, alignItems: "center", marginTop: 6 }}>
+            <div style={{ width: 210, height: 210, flex: "0 0 auto" }}>
+              {hazir && (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={nufDag.arr} dataKey="deger" nameKey="ad" cx="50%" cy="50%" innerRadius={54} outerRadius={92} paddingAngle={1} stroke="#fff" strokeWidth={1}>
+                      {nufDag.arr.map((e, i) => <Cell key={i} fill={e.ad === "Diğer" ? "#94a3b8" : NUF_RENK[i % NUF_RENK.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(v, n) => [fmt(v) + " kişi", n]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div style={{ flex: "1 1 200px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "5px 16px", minWidth: 180 }}>
+              {nufDag.arr.map((e, i) => {
+                const diger = e.ad === "Diğer";
+                return (
+                  <div key={i} onClick={diger ? () => setDigerAcik((v) => !v) : undefined}
+                    style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, cursor: diger ? "pointer" : "default" }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: diger ? "#94a3b8" : NUF_RENK[i % NUF_RENK.length], flex: "0 0 auto" }} />
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: diger ? "underline dotted" : "none" }}>
+                      {e.ad}{diger ? ` (${e.detay.length} il ▾)` : ""}
+                    </span>
+                    <b className="mono">{fmt(e.deger)}</b>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {digerAcik && (() => {
+            const dg = nufDag.arr.find((x) => x.ad === "Diğer");
+            if (!dg) return null;
+            return (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #eef1f4" }}>
+                <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>"Diğer" içindeki iller ({dg.detay.length} il · {fmt(dg.deger)} kişi)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: "4px 16px" }}>
+                  {dg.detay.map((x, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12.5 }}>
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.ad}</span>
+                      <b className="mono">{fmt(x.deger)}</b>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+          </>
+        )}
+        </div>
     </>
   );
 }

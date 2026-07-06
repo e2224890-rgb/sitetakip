@@ -4,6 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { Users, FileText, Search, MapPin, CheckCircle2, Circle, Download, UserCheck, X } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { NUF_RENK, csvIndir, fmt, haneBaslik, oran, sokakAdres, yakRenk } from "../../lib/format";
+import { cacheOku, cacheYaz } from "../../lib/cache";
 import GrupBaskanPanel from "./GrupBaskanPanel";
 import SokakBolStrip from "./SokakBolStrip";
 import Sorumlular from "./Sorumlular";
@@ -38,6 +39,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
   const [zModal, setZModal] = useState(null);
   const [digerAcik, setDigerAcik] = useState(false);
   const [nufBlok, setNufBlok] = useState("");
+  const [gorunen, setGorunen] = useState(200); // aşamalı render: aynı anda kaç hane satırı çizilsin
   useEffect(() => { setGrupAd(grup ? (grup.baskan_ad || "") : ""); }, [grup ? grup.id : null]);
 
   useEffect(() => { setSorumluId(birim.sorumlu_id || ""); setKoordId(birim.koordinator_id || ""); }, [birim.id]);
@@ -70,7 +72,10 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
   }
 
   async function yukle() {
-    setHaneler(null);
+    // Stale-while-revalidate: aynı birimi ikinci açışta son bilinen veri ANINDA gelir, arka planda tazelenir.
+    const haneCacheKey = `hane:${isSite ? "s" : "b"}:${birim.id}:${haneIds ? haneIds.length + "|" + (haneIds[0] ?? "") + "|" + (haneIds[haneIds.length - 1] ?? "") : "all"}`;
+    const snap = cacheOku(haneCacheKey);
+    if (snap && snap.length) setHaneler(snap); else setHaneler(null);
     try {
       const hq = supabase.from("hane").select("id, no, adres, kapi_no, kapi_blok, ilce_id").order("no");
       const _hr = await (isSite ? hq.eq("site_kayit_id", birim.id) : hq.eq("bolge_id", birim.id).is("site_kayit_id", null));
@@ -97,13 +102,15 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
       setHedefTarih(meta?.hedef_tarih || "");
       const kBy = {}; (kRows || []).forEach((k) => { (kBy[k.hane_id] ||= []).push(k); });
       const zBy = {}; (zRows || []).forEach((z) => { zBy[z.hane_id] = z; });
-      setHaneler((hRows || []).map((h) => {
+      const built = (hRows || []).map((h) => {
         const z = zBy[h.id] || {};
         return { ...h, kisiler: kBy[h.id] || [], ziyaret: z.durum === "ziyaret_edildi", not_: z.not_ || "", tarih: z.tarih || null, onceki_tarih: z.onceki_tarih || null, yaklasim: z.yaklasim || null, kapsam: z.kapsam || "" };
-      }));
+      });
+      setHaneler(built);
+      if (built.length && built.length <= 1500) cacheYaz(haneCacheKey, built); // çok büyük birimlerde localStorage'ı şişirme
     } catch (e) {
       console.error("Haneler yükleme hatası:", e);
-      setHaneler([]);   // sonsuz "yükleniyor"da kalmasın
+      if (!(snap && snap.length)) setHaneler([]);   // cache yoksa sonsuz "yükleniyor"da kalmasın
     }
   }
   useEffect(() => { yukle(); }, [birim.id, birim.yenile]);
@@ -190,6 +197,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
   }, [haneler, isSite]);
 
   useEffect(() => { setNufBlok(""); setDigerAcik(false); }, [birim.id, grup ? grup.id : null]);
+  useEffect(() => { setGorunen(200); }, [birim.id, grup ? grup.id : null, ara, nufBlok]);
 
   const nufusDagilim = useMemo(() => {
     let hs = haneler || [];
@@ -409,7 +417,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
             <table className="htable hane-table">
               <thead><tr><th>Hane</th><th>Kişiler</th><th className="sag">Seçmen</th><th className="sag">Üye</th><th className="sag">Ziyaret</th></tr></thead>
               <tbody>
-                {suzulmus.map((h) => {
+                {suzulmus.slice(0, gorunen).map((h) => {
                   const sec = h.kisiler.filter((k) => k.secmen).length;
                   const uye = h.kisiler.filter((k) => k.uye).length;
                   return (
@@ -459,6 +467,13 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
               </tbody>
             </table>
           )}
+        {suzulmus.length > gorunen && (
+          <div style={{ display: "flex", justifyContent: "center", padding: "12px 0" }}>
+            <button className="btn" onClick={() => setGorunen((n) => n + 300)}>
+              Daha fazla göster ({fmt(gorunen)} / {fmt(suzulmus.length)})
+            </button>
+          </div>
+        )}
       </div>
       {zModal && (() => {
         const h = (haneler || []).find((x) => x.id === zModal.id);

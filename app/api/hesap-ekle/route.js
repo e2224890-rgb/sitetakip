@@ -72,11 +72,18 @@ export async function PATCH(req) {
     if (!a) return Response.json({ error: "Sunucuda SUPABASE_SERVICE_ROLE tanımlı değil." }, { status: 500 });
     const token = (req.headers.get("authorization") || "").replace("Bearer ", "");
     if (!(await yetkiVar(a, token))) return Response.json({ error: "Yetkiniz yok." }, { status: 403 });
-    const { id, blok, site_kayit_id } = await req.json();
+    const { id, blok, site_kayit_id, rol } = await req.json();
     if (!id) return Response.json({ error: "id gerekli." }, { status: 400 });
     const upd = {};
     if (blok !== undefined) upd.blok = blok || null;
     if (site_kayit_id !== undefined) upd.site_kayit_id = site_kayit_id || null;
+    if (rol !== undefined) {
+      const gecerli = [...GENEL_ROLLER, ...BLOK_ROLLER].includes(rol) ? rol : null;
+      if (!gecerli) return Response.json({ error: "Geçersiz rol." }, { status: 400 });
+      upd.rol = gecerli;
+      // Genel role dönerse blok/site bağını temizle (tutarlılık)
+      if (!BLOK_ROLLER.includes(gecerli)) { upd.blok = null; upd.site_kayit_id = null; }
+    }
     if (Object.keys(upd).length === 0) return Response.json({ error: "Güncellenecek alan yok." }, { status: 400 });
     const { error } = await a.from("profiles").update(upd).eq("id", id);
     if (error) return Response.json({ error: error.message }, { status: 400 });

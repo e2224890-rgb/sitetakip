@@ -1,11 +1,13 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../lib/supabase";
-import { ChevronRight, Search, UserCheck } from "lucide-react";
+import { ChevronRight, Search, UserCheck, Building2, Users } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
-import { fmt } from "../../lib/format";
+import { fmt, oran } from "../../lib/format";
 import BlokSorumlulari from "./BlokSorumlulari";
+import SiteYonetimListe from "./SiteYonetimListe";
 import Haneler from "./Haneler";
+import DemografiPano from "./DemografiPano";
 
 export default function Siteler({ profil, sabitMahalle }) {
   const ilceYon = profil.rol === "ilce_yonetimi";
@@ -25,6 +27,8 @@ export default function Siteler({ profil, sabitMahalle }) {
   const [mesaj, setMesaj] = useState("");
   const [siteHane, setSiteHane] = useState(null);
   const [yenile, setYenile] = useState(0);
+  const [mahStat, setMahStat] = useState(null);
+  const sonMahRef = useRef(null); // son seçilen mahalle -> arka plan cinsiyet sayımı hâlâ geçerli mi? // mahallenin demografisi (mv_mahalle_ozet) -> DemografiPano
 
   const siteAd = useMemo(() => { const o = {}; siteler.forEach((s) => o[s.id] = s); return o; }, [siteler]);
   const profAd = useMemo(() => { const o = {}; profiller.forEach((p) => o[p.id] = p); return o; }, [profiller]);
@@ -44,19 +48,41 @@ export default function Siteler({ profil, sabitMahalle }) {
   })(); }, [sabitMahalle?.mahalle_id]);
 
   async function mahalleSec(m) {
-    setSecMah(m); setSecSite(null); setSecSokak(null); setKapilar([]); setSecKey(new Set()); setMesaj(""); setYukleniyor(true);
-    const [{ data: s }, { data: oz }, { data: sk }, { data: pr }] = await Promise.all([
+    setSecMah(m); setSecSite(null); setSecSokak(null); setKapilar([]); setSecKey(new Set()); setMesaj(""); setYukleniyor(true); setMahStat(null);
+    sonMahRef.current = m.mahalle_id;
+    // Hızlı sorgular -> sayfa ANINDA açılır
+    const [{ data: s }, { data: oz }, { data: sk }, { data: pr }, { data: mo }] = await Promise.all([
       supabase.from("site_kayit").select("id,ad,blok_sayisi,daire_sayisi,villa_sayisi,baskan,baskan_tel,mudur,mudur_tel,adres,temsilci_id,koordinator_id").eq("mahalle_id", m.mahalle_id).order("ad"),
       supabase.from("mv_site_ozet").select("site_kayit_id,hane,kisi,uye").eq("mahalle_id", m.mahalle_id),
       supabase.from("sokak").select("id,ad").eq("mahalle_id", m.mahalle_id).order("ad"),
       supabase.from("profiles").select("id,ad_soyad,rol").in("rol", ["sorumlu", "koordinator"]),
+      supabase.from("mv_mahalle_ozet").select("kisi,hane,uye,erkek,kadin,y1824,y2534,y3544,y4554,y5564,y65").eq("mahalle_id", m.mahalle_id).single(),
     ]);
     const ozMap = {}; (oz || []).forEach((o) => ozMap[o.site_kayit_id] = o);
+    setMahStat({
+      kisi: mo?.kisi || 0, hane: mo?.hane || 0, uye: mo?.uye || 0,
+      erkek: mo?.erkek || 0, kadin: mo?.kadin || 0, // MV değeri (hızlı); doğru cinsiyet arkadan gelir
+      yasArr: [
+        { ad: "18-24", deger: mo?.y1824 || 0 }, { ad: "25-34", deger: mo?.y2534 || 0 },
+        { ad: "35-44", deger: mo?.y3544 || 0 }, { ad: "45-54", deger: mo?.y4554 || 0 },
+        { ad: "55-64", deger: mo?.y5564 || 0 }, { ad: "65+", deger: mo?.y65 || 0 },
+      ],
+    });
     setSiteler(s || []); setOzet(ozMap); setSokaklar(sk || []); setProfiller(pr || []); setYukleniyor(false);
+
+    // Cinsiyet doğru sayımı (E/K ve Erkek/Kadın karışık) -> arka planda, sayfayı bekletmeden
+    const mid = m.mahalle_id;
+    Promise.all([
+      supabase.from("kisi").select("*", { count: "exact", head: true }).eq("mahalle_id", mid).ilike("cinsiyet", "e%"),
+      supabase.from("kisi").select("*", { count: "exact", head: true }).eq("mahalle_id", mid).ilike("cinsiyet", "k%"),
+    ]).then(([eR, kR]) => {
+      if (sonMahRef.current !== mid) return; // kullanıcı başka mahalleye geçtiyse ez me
+      setMahStat((st) => st ? { ...st, erkek: eR?.count || 0, kadin: kR?.count || 0 } : st);
+    }).catch(() => { });
   }
 
-  async function siteSec(s) {
-    setSecSite(s); setSiteTab("atama"); setSecSokak(null); setKapilar([]); setSecKey(new Set()); setMesaj(""); setSiteHane(null);
+  async function siteSec(s, tab = "atama") {
+    setSecSite(s); setSiteTab(tab); setSecSokak(null); setKapilar([]); setSecKey(new Set()); setMesaj(""); setSiteHane(null);
     const { data } = await supabase.from("hane").select("no, kisi(ad,soyad,uye)").eq("site_kayit_id", s.id).limit(500);
     setSiteHane(data || []);
   }
@@ -131,77 +157,60 @@ export default function Siteler({ profil, sabitMahalle }) {
       {yukleniyor && <div className="dim" style={{ padding: 20 }}>Yükleniyor…</div>}
 
       {!yukleniyor && !secSite && secMah && (
-        <div className="mahalle-grid">
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="ara-kutu"><Search size={15} /><input placeholder="Site ara…" value={ara} onChange={(e) => setAra(e.target.value)} /></div>
-            <div className="site-grid">
-              {siteFiltre.map((s) => { const o = ozet[s.id] || {}; const bos = !(o.hane > 0); return (
-                <div key={s.id} className={"site-kart" + (bos ? " veri-yok" : "")} onClick={() => siteSec(s)}>
-                  <div className="sk-ad">{s.ad}</div>
-                  <div className="sk-meta">{s.blok_sayisi ?? "?"} blok · {s.daire_sayisi ?? "?"} daire{s.villa_sayisi ? ` · ${s.villa_sayisi} villa` : ""}</div>
-                  {bos
-                    ? <div className="sk-bekle">Veri bekleniyor</div>
-                    : <div className="sk-say"><b>{fmt(o.hane || 0)}</b> hane · <b>{fmt(o.kisi || 0)}</b> kişi</div>}
-                  <div className="sk-tem">{s.temsilci_id ? <span className="rozet ok"><UserCheck size={12} /> {profAd[s.temsilci_id]?.ad_soyad || "Temsilci"}</span> : <span className="rozet bos">Temsilci yok</span>}</div>
-                </div>
-              ); })}
-              {siteFiltre.length === 0 && <div className="dim">Site yok.</div>}
+        <>
+          <DemografiPano
+            stat={mahStat || { kisi: siteStat.kisi, hane: siteStat.hane, uye: siteStat.uye, erkek: 0, kadin: 0, yasArr: [] }}
+            ekstra={{ ic: <Building2 size={15} />, lbl: "Site", num: fmt(siteStat.site), meta: `${fmt(siteStat.blok)} blok · ${siteStat.tem}/${siteStat.site} temsilci`, renk: "#0891b2", onClick: () => document.getElementById("site-listesi")?.scrollIntoView({ behavior: "smooth", block: "start" }) }}
+            mahalleIds={[secMah.mahalle_id]}
+            baslik={`${secMah.ad} Mahallesi`}
+          />
+          <div className="ara-kutu" id="site-listesi" style={{ marginTop: 15, scrollMarginTop: 14 }}><Search size={15} /><input placeholder="Site ara…" value={ara} onChange={(e) => setAra(e.target.value)} /></div>
+          <div className="panel">
+              {siteFiltre.length === 0
+                ? <div className="merkez">Site yok.</div>
+                : (
+                  <div className="cards">
+                    {siteFiltre.map((s) => {
+                      const o = ozet[s.id] || {};
+                      const bos = !(o.hane > 0);
+                      return (
+                        <div key={s.id} className="card" onClick={() => siteSec(s)}>
+                          <div className="card-t">{s.ad} <ChevronRight size={15} /></div>
+                          <div style={{ marginBottom: 8 }}>
+                            <span className="tip-tag site">
+                              <Building2 size={11} /> {s.blok_sayisi ?? "?"} blok · {s.daire_sayisi ?? "?"} daire{s.villa_sayisi ? ` · ${s.villa_sayisi} villa` : ""}
+                            </span>
+                          </div>
+                          {bos ? (
+                            <div className="bolge-stat"><span className="dim">Veri bekleniyor</span></div>
+                          ) : (
+                            <>
+                              <div className="card-nums">
+                                <div><b>{fmt(o.kisi || 0)}</b><span>kişi</span></div>
+                                <div><b>{fmt(o.hane || 0)}</b><span>hane</span></div>
+                                <div className="acc"><b>{fmt(o.uye || 0)}</b><span>üye</span></div>
+                              </div>
+                              <div className="bar"><i style={{ width: `${oran(o.uye || 0, o.kisi || 0)}%` }} /></div>
+                            </>
+                          )}
+                          <div className="atama-chips" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            {s.temsilci_id
+                              ? <span className="chip u"><UserCheck size={12} /> Temsilci: {profAd[s.temsilci_id]?.ad_soyad || "atandı"}</span>
+                              : <span className="chip s">Temsilci yok</span>}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); siteSec(s, "yonetim"); }}
+                              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", fontSize: 12, fontWeight: 600, color: "#4338ca", background: "#eef2ff", border: "1px solid #e0e7ff", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
+                              title="Blok Sorumlusu · Ana Kademe · Kadın Kolları · Gençlik Kolları">
+                              <Users size={13} /> Yönetim Listesi
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
             </div>
-          </div>
-          <aside className="ozet-aside">
-            <div className="panel" style={{ padding: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Özet</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                {[["Site", fmt(siteStat.site)], ["Blok", fmt(siteStat.blok)], ["Hane", fmt(siteStat.hane)], ["Kişi", fmt(siteStat.kisi)]].map(([l, v]) => (
-                  <div key={l}><div style={{ fontSize: 21, fontWeight: 800 }}>{v}</div><div style={{ fontSize: 12, color: "var(--ink2)" }}>{l}</div></div>
-                ))}
-              </div>
-            </div>
-            <div className="panel" style={{ padding: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Üyelik</div>
-              <div style={{ position: "relative" }}>
-                <ResponsiveContainer width="100%" height={170}>
-                  <PieChart>
-                    <Pie data={sUyeData} dataKey="value" innerRadius={52} outerRadius={78} paddingAngle={2} stroke="none">
-                      <Cell fill="var(--accent2)" /><Cell fill="#e5e9f0" />
-                    </Pie>
-                    <Tooltip formatter={(v) => fmt(v)} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-                  <div style={{ fontSize: 25, fontWeight: 800, color: "var(--accent2)" }}>%{sUyePct}</div>
-                  <div style={{ fontSize: 11, color: "var(--ink2)" }}>üye</div>
-                </div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 6 }}>
-                <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "var(--accent2)", marginRight: 6 }} />Üye <b>{fmt(siteStat.uye)}</b></span>
-                <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#e5e9f0", marginRight: 6 }} />Değil <b>{fmt(Math.max(0, siteStat.kisi - siteStat.uye))}</b></span>
-              </div>
-            </div>
-            <div className="panel" style={{ padding: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Atama durumu</div>
-              <div style={{ position: "relative" }}>
-                <ResponsiveContainer width="100%" height={170}>
-                  <PieChart>
-                    <Pie data={sAtaData} dataKey="value" innerRadius={52} outerRadius={78} paddingAngle={2} stroke="none">
-                      <Cell fill="var(--ok)" /><Cell fill="#e5e9f0" />
-                    </Pie>
-                    <Tooltip formatter={(v) => fmt(v)} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-                  <div style={{ fontSize: 25, fontWeight: 800, color: "var(--ok)" }}>%{sAtaPct}</div>
-                  <div style={{ fontSize: 11, color: "var(--ink2)" }}>atandı</div>
-                </div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 6 }}>
-                <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "var(--ok)", marginRight: 6 }} />Atandı <b>{fmt(siteStat.tem)}</b></span>
-                <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#e5e9f0", marginRight: 6 }} />Kalan <b>{fmt(Math.max(0, siteStat.site - siteStat.tem))}</b></span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 8, paddingTop: 8, borderTop: "1px solid #eef2f7" }}><span>Temsilci atanan site</span><b>{siteStat.tem} / {siteStat.site}</b></div>
-            </div>
-          </aside>
-        </div>
+        </>
       )}
 
       {!yukleniyor && secSite && (<>
@@ -209,13 +218,14 @@ export default function Siteler({ profil, sabitMahalle }) {
         <div className="site-detay">
           <div className="sd-bas"><div><h3>{secSite.ad}</h3><div className="dim">{secSite.blok_sayisi ?? "?"} blok · {secSite.daire_sayisi ?? "?"} daire · {secSite.adres || ""}</div></div></div>
 
-          <div style={{ display: "flex", gap: 4, margin: "4px 0 14px", borderBottom: "1px solid #e5e7eb" }}>
-            {[["atama", "Site & Haneler"], ["sorumlu", "Blok Görevlileri"]].map(([k, t]) => (
+          <div style={{ display: "flex", gap: 4, margin: "4px 0 14px", borderBottom: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+            {[["atama", "Site & Haneler"], ["yonetim", "Site Yönetimi"], ["sorumlu", "Blok Atama"]].map(([k, t]) => (
               <button key={k} onClick={() => setSiteTab(k)} style={{ padding: "8px 14px", border: "none", background: "none", borderBottom: "2px solid " + (siteTab === k ? "#2563eb" : "transparent"), color: siteTab === k ? "#2563eb" : "#64748b", fontWeight: 600, fontSize: 14, cursor: "pointer", marginBottom: -1 }}>{t}</button>
             ))}
           </div>
 
-          {siteTab === "sorumlu" ? <BlokSorumlulari site={secSite} /> : (<>
+          {siteTab === "yonetim" ? <SiteYonetimListe site={secSite} />
+            : siteTab === "sorumlu" ? <BlokSorumlulari site={secSite} /> : (<>
           <Haneler
             birim={{ tip: "site", id: secSite.id, kod: secSite.ad, mahalleAd: secMah?.ad,
               kapsam: `${secSite.blok_sayisi ?? "?"} blok · ${secSite.daire_sayisi ?? "?"} daire${secSite.adres ? " · " + secSite.adres : ""}`,

@@ -4,12 +4,25 @@ import { supabase } from "../../lib/supabase";
 import { UserCheck, Trash2 } from "lucide-react";
 import { oran } from "../../lib/format";
 
+const ROL_SECENEK = [
+  ["sorumlu", "Sorumlu"], ["koordinator", "Koordinatör"],
+  ["blok_sorumlu", "Blok Sorumlusu"], ["ana_kademe", "Ana Kademe"],
+  ["kadin_kollari", "Kadın Kolları"], ["genclik_kollari", "Gençlik Kolları"],
+];
+const ROL_AD = Object.fromEntries([...ROL_SECENEK, ["ilce_yonetimi", "İlçe Başkanı"], ["il_yonetimi", "İl Başkanı"]]);
+const BLOK_ROL = ["blok_sorumlu", "ana_kademe", "kadin_kollari", "genclik_kollari"];
+function rolChipSinif(rol) {
+  return rol === "koordinator" ? "k" : rol === "ilce_yonetimi" || rol === "il_yonetimi" ? "i"
+    : BLOK_ROL.includes(rol) ? "b" : "s";
+}
+
 export default function Sorumlular({ profil }) {
   const ilceYon = profil?.rol === "ilce_yonetimi";
   const [kisiler, setKisiler] = useState(null);
   const [mahalleler, setMahalleler] = useState([]);
   const [formAcik, setFormAcik] = useState(false);
-  const [yh, setYh] = useState({ ad: "", eposta: "", sifre: "", rol: "sorumlu", telefon: "", meslek: "", tc: "", ilce_id: "" });
+  const [yh, setYh] = useState({ ad: "", eposta: "", sifre: "", rol: "sorumlu", telefon: "", meslek: "", tc: "", ilce_id: "", site_kayit_id: "", blok: "" });
+  const [siteListesi, setSiteListesi] = useState([]);
   const [ilceListesi, setIlceListesi] = useState([]);
   const [ekDurum, setEkDurum] = useState(null);
   const [ekleniyor, setEkleniyor] = useState(false);
@@ -18,14 +31,19 @@ export default function Sorumlular({ profil }) {
   const [kaydedilen, setKaydedilen] = useState(null);
 
   async function yukle() {
+    const TUM_ROL = ["sorumlu", "koordinator", "ilce_yonetimi", "blok_sorumlu", "ana_kademe", "kadin_kollari", "genclik_kollari"];
     const { data: profs } = await supabase.from("profiles")
-      .select("id, ad_soyad, eposta, telefon, meslek, tc_no, rol, ilce_id").in("rol", ["sorumlu", "koordinator", "ilce_yonetimi"]).order("ad_soyad");
+      .select("id, ad_soyad, eposta, telefon, meslek, tc_no, rol, ilce_id, site_kayit_id, blok").in("rol", TUM_ROL).order("ad_soyad");
     const { data: ilceler } = await supabase.from("ilce").select("id, ad");
     const ilceAd = {}; (ilceler || []).forEach((i) => ilceAd[i.id] = i.ad);
     const { data: bs } = await supabase.from("bolge").select("id, kod, kapsam, mahalle_id, sorumlu_id, koordinator_id");
     const { data: mh } = await supabase.from("mahalle").select("id, ad").order("ad");
     setMahalleler(mh || []);
     const mahAd = {}; (mh || []).forEach((m) => mahAd[m.id] = m.ad);
+    // Site adları: hem görevlinin site_kayit_id'si, hem site başkanı olduğu siteler
+    const { data: siteBaskan } = await supabase.from("site_kayit").select("id, ad, temsilci_id");
+    const siteAd = {}; const baskanSite = {}; // temsilci_id -> site adı
+    (siteBaskan || []).forEach((s) => { siteAd[s.id] = s.ad; if (s.temsilci_id) (baskanSite[s.temsilci_id] ||= []).push(s.ad); });
     const byPerson = {};
     (bs || []).forEach((b) => {
       if (b.sorumlu_id) (byPerson[b.sorumlu_id] ||= []).push(b);
@@ -47,11 +65,18 @@ export default function Sorumlular({ profil }) {
         : bls.length === 0 ? "—"
           : bls.length === 1 ? `${mahSet[0] || ""} · ${bls[0].kapsam || bls[0].kod}`
             : `${mahSet.join(", ")} · ${bls.length} bölge`;
-      return { ...p, bolgeSay: bls.length, hane, vis, ilerleme: oran(vis, hane), kapsam };
+      // Unvan etiketi: site başkanı olduğu site(ler) + blok görevi
+      const baskanSiteleri = baskanSite[p.id] || [];
+      const gorevSite = p.site_kayit_id ? siteAd[p.site_kayit_id] : null;
+      return { ...p, bolgeSay: bls.length, hane, vis, ilerleme: oran(vis, hane), kapsam, baskanSiteleri, gorevSite };
     }));
     setKisiler(zengin);
   }
   useEffect(() => { yukle(); }, []);
+  useEffect(() => { (async () => {
+    const { data } = await supabase.from("site_kayit").select("id, ad, mahalle_id").order("ad");
+    setSiteListesi(data || []);
+  })(); }, []);
   useEffect(() => {
     if (ilceYon) return;
     (async () => {
@@ -71,13 +96,26 @@ export default function Sorumlular({ profil }) {
       const r = await fetch("/api/hesap-ekle", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
-        body: JSON.stringify({ ad_soyad: yh.ad, eposta: yh.eposta, sifre: yh.sifre, rol: yh.rol, telefon: yh.telefon, meslek: yh.meslek, tc_no: yh.tc, ilce_id: yh.ilce_id }),
+        body: JSON.stringify({ ad_soyad: yh.ad, eposta: yh.eposta, sifre: yh.sifre, rol: yh.rol, telefon: yh.telefon, meslek: yh.meslek, tc_no: yh.tc, ilce_id: yh.ilce_id, site_kayit_id: BLOK_ROL.includes(yh.rol) ? yh.site_kayit_id : null, blok: BLOK_ROL.includes(yh.rol) ? yh.blok : null }),
       });
       const j = await r.json();
       if (!r.ok) setEkDurum({ tip: "err", mesaj: j.error || "Hata" });
-      else { setEkDurum({ tip: "ok", mesaj: `${yh.eposta} oluşturuldu` }); setYh({ ad: "", eposta: "", sifre: "", rol: yh.rol, telefon: "", meslek: "", tc: "", ilce_id: yh.ilce_id }); await yukle(); }
+      else { setEkDurum({ tip: "ok", mesaj: `${yh.eposta} oluşturuldu` }); setYh({ ad: "", eposta: "", sifre: "", rol: yh.rol, telefon: "", meslek: "", tc: "", ilce_id: yh.ilce_id, site_kayit_id: "", blok: "" }); await yukle(); }
     } catch (e) { setEkDurum({ tip: "err", mesaj: String(e) }); }
     setEkleniyor(false);
+  }
+
+  async function rolDegistir(p, yeniRol) {
+    if (yeniRol === p.rol) return;
+    setKisiler((prev) => prev.map((x) => x.id === p.id ? { ...x, rol: yeniRol } : x)); // iyimser
+    const { data: { session } } = await supabase.auth.getSession();
+    const r = await fetch("/api/hesap-ekle", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
+      body: JSON.stringify({ id: p.id, rol: yeniRol }),
+    });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert("Rol değiştirilemedi: " + (j.error || r.status)); }
+    await yukle();
   }
 
   async function hesapSil(p) {
@@ -139,8 +177,16 @@ export default function Sorumlular({ profil }) {
             <div className="hf"><label>Meslek</label><input className="inp2" value={yh.meslek} onChange={(e) => setYh({ ...yh, meslek: e.target.value })} placeholder="Öğretmen" /></div>
             <div className="hf"><label>Rol</label>
               <select className="sel" value={yh.rol} onChange={(e) => setYh({ ...yh, rol: e.target.value })}>
-                <option value="sorumlu">Sorumlu</option><option value="koordinator">Koordinatör</option>
+                {ROL_SECENEK.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 {!ilceYon && <option value="ilce_yonetimi">İlçe Başkanı</option>}</select></div>
+            {BLOK_ROL.includes(yh.rol) && (<>
+              <div className="hf"><label>Site</label>
+                <select className="sel" value={yh.site_kayit_id} onChange={(e) => setYh({ ...yh, site_kayit_id: e.target.value })}>
+                  <option value="">Site seç…</option>
+                  {siteListesi.map((s) => <option key={s.id} value={s.id}>{s.ad}</option>)}
+                </select></div>
+              <div className="hf"><label>Blok(lar)</label><input className="inp2" value={yh.blok} onChange={(e) => setYh({ ...yh, blok: e.target.value })} placeholder="Örn: A1 veya A1,A2" /></div>
+            </>)}
             {!ilceYon && (
               <div className="hf"><label>İlçe</label>
                 <select className="sel" value={yh.ilce_id} onChange={(e) => setYh({ ...yh, ilce_id: e.target.value })}>
@@ -168,7 +214,19 @@ export default function Sorumlular({ profil }) {
                         <div className="kisi-alt">{p.eposta}{p.meslek ? " · " + p.meslek : ""}{p.tc_no ? " · TC: " + p.tc_no : ""}</div>
                         {p.telefon && <div className="kisi-alt">{p.telefon}</div>}
                       </td>
-                      <td><span className={"rolchip " + (p.rol === "koordinator" ? "k" : p.rol === "ilce_yonetimi" ? "i" : "s")}>{p.rol === "koordinator" ? "Koordinatör" : p.rol === "ilce_yonetimi" ? "İlçe Başkanı" : "Sorumlu"}</span></td>
+                      <td>
+                        {p.rol === "ilce_yonetimi" || p.rol === "il_yonetimi"
+                          ? <span className={"rolchip " + rolChipSinif(p.rol)}>{ROL_AD[p.rol]}</span>
+                          : <select className="sel" style={{ padding: "4px 8px", fontSize: 12.5, minWidth: 128 }} value={p.rol} onChange={(e) => rolDegistir(p, e.target.value)}>
+                              {ROL_SECENEK.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                            </select>}
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
+                          {(p.baskanSiteleri || []).map((ad, i) => (
+                            <span key={i} style={{ fontSize: 11, background: "#ffedd5", color: "#9a3412", padding: "1px 7px", borderRadius: 6, fontWeight: 600 }}>Site Başkanı · {ad}</span>
+                          ))}
+                          {BLOK_ROL.includes(p.rol) && p.gorevSite ? <span style={{ fontSize: 11, background: "#e0f2fe", color: "#0369a1", padding: "1px 7px", borderRadius: 6, fontWeight: 600 }}>{p.gorevSite}{p.blok ? " · " + p.blok + " Blok" : ""}</span> : null}
+                        </div>
+                      </td>
                       <td className="dim">{p.kapsam}</td>
                       <td className="sag mono">{p.bolgeSay ? `${p.vis}/${p.hane}` : "—"}</td>
                       <td>

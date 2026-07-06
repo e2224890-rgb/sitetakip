@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
 import Haneler from "./Haneler";
+import { sokakGrupBol } from "./EkipAtama";
 
 export default function SokakBolStrip({ bolge, onChanged }) {
   const [gruplar, setGruplar] = useState(null);

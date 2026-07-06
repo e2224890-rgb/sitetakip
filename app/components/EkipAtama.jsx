@@ -73,7 +73,7 @@ export default function EkipAtama({ site }) {
 /* Ortak bölme: bölgeyi kapı/daire sırasına göre ~hedef'lik gruplara böler.
    Birim = EV (hane); hiçbir ev bölünmez. Normal binalar bütün kalır (160'lık bina tek grup),
    ama tek başına çok büyük bina (ör. 410) ev bazında ~hedef'e bölünür. Grup sayısını döner. */
-async function sokakGrupBol(bolgeId, hedef) {
+export async function sokakGrupBol(bolgeId, hedef) {
   const H = Math.max(1, hedef || 150);
   const TOL = Math.round(H * 0.15); // bina kuyruğu bu kadarı geçmiyorsa bütün bırak (~160 tek kalır)
   const [{ data: ks }, { data: hrows }] = await Promise.all([

@@ -11,12 +11,34 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
   const [kapsam, setKapsam] = useState(hane.kapsam || "");
   const [not_, setNot] = useState(hane.not_ || "");
   const [gecmis, setGecmis] = useState(null);
+  const [kisiMap, setKisiMap] = useState({}); // kullanici_id -> profil (ad_soyad, rol)
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("ziyaret_log").select("tarih, yaklasim, kapsam, not_").eq("hane_id", hane.id).order("tarih", { ascending: false }).limit(50);
-      setGecmis(data || []);
+      const { data } = await supabase.from("ziyaret_log").select("tarih, yaklasim, kapsam, not_, kullanici_id").eq("hane_id", hane.id).order("tarih", { ascending: false }).limit(50);
+      const list = data || [];
+      setGecmis(list);
+      const uids = [...new Set(list.map((g) => g.kullanici_id).filter(Boolean))];
+      if (uids.length) {
+        const { data: pr } = await supabase.from("profiles").select("id, ad_soyad, eposta, rol").in("id", uids);
+        const m = {}; (pr || []).forEach((p) => { m[p.id] = p; }); setKisiMap(m);
+      } else setKisiMap({});
     })();
   }, [hane.id, hane.tarih]);
+  // Rol -> okunur etiket. Site bağlamında "sorumlu" = Site Başkanı.
+  const rolEtiket = (rol) => {
+    const blok = { blok_sorumlu: "Blok Sorumlusu", ana_kademe: "Ana Kademe", kadin_kollari: "Kadın Kolları", genclik_kollari: "Gençlik Kolları" };
+    if (blok[rol]) return blok[rol];
+    if (rol === "sorumlu") return isSite ? "Site Başkanı" : "Sorumlu";
+    if (rol === "koordinator") return "Koordinatör";
+    if (rol === "grup_baskani") return "Grup Başkanı";
+    if (rol === "il_yonetimi" || rol === "ilce_yonetimi") return "Yönetim";
+    return "Görevli";
+  };
+  const rolRenk = (rol) => rol === "kadin_kollari" ? { bg: "#fce7f3", fg: "#9d174d" }
+    : rol === "genclik_kollari" ? { bg: "#dcfce7", fg: "#166534" }
+      : rol === "ana_kademe" ? { bg: "#e0e7ff", fg: "#3730a3" }
+        : rol === "sorumlu" ? { bg: "#ffedd5", fg: "#9a3412" }
+          : { bg: "#f1f5f9", fg: "#475569" };
   const baslik = haneBaslik(hane, isSite) || "Hane";
   const yakEtiket = ["", "Çok olumsuz", "Olumsuz", "Kararsız", "Olumlu", "Çok olumlu"];
   return (
@@ -28,7 +50,7 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
         </div>
         {isSite && hane.adres && <div style={{ fontSize: 13, color: "#64748b", marginBottom: 8 }}>{hane.adres}{hane.kapi_no ? ` No ${hane.kapi_no}` : ""}</div>}
         {mapsHref && (
-          <a href={mapsHref} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, color: "#2563eb", textDecoration: "none", fontWeight: 600, marginBottom: 12 }}>
+          <a href={mapsHref} target="_blank" rel="noopener noreferrer" style={{ display: "flex", width: "fit-content", alignItems: "center", gap: 5, fontSize: 13, color: "#2563eb", textDecoration: "none", fontWeight: 600, marginBottom: 12 }}>
             <MapPin size={14} /> Haritada aç · yol tarifi
           </a>
         )}
@@ -42,19 +64,24 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
           <div style={{ margin: "0 0 14px", border: "1px solid #eef2f7", borderRadius: 10, overflow: "hidden" }}>
             <div style={{ fontSize: 11, fontWeight: 800, color: "#475569", padding: "8px 10px 6px", background: "#f8fafc" }}>GEÇMİŞ ZİYARETLER ({gecmis.length})</div>
             <div style={{ maxHeight: 150, overflowY: "auto" }}>
-              {gecmis.map((g, i) => (
+              {gecmis.map((g, i) => {
+                const p = g.kullanici_id ? kisiMap[g.kullanici_id] : null;
+                const rk = p ? rolRenk(p.rol) : null;
+                return (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderTop: "1px solid #f1f5f9", fontSize: 12.5, flexWrap: "wrap" }}>
                   <b style={{ minWidth: 112 }}>{g.tarih ? new Date(g.tarih).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</b>
                   {g.yaklasim ? <span style={{ color: yakRenk(g.yaklasim), fontWeight: 700 }}>Yaklaşım {g.yaklasim}/5</span> : null}
                   {g.kapsam ? <span style={{ background: "#eef2ff", color: "#3730a3", padding: "1px 8px", borderRadius: 6 }}>{g.kapsam}</span> : null}
+                  {p ? <span style={{ background: rk.bg, color: rk.fg, padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{p.ad_soyad || p.eposta} · {rolEtiket(p.rol)}</span> : null}
                   {g.not_ ? <span style={{ color: "#64748b", width: "100%", marginLeft: 112 }}>— {g.not_}</span> : null}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        <label style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>KARŞI TARAFIN YAKLAŞIMI</label>
+        <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginTop: 14 }}>KARŞI TARAFIN YAKLAŞIMI</label>
         <div style={{ display: "flex", gap: 6, margin: "7px 0 4px" }}>
           {[1, 2, 3, 4, 5].map((n) => (
             <button key={n} onClick={() => setYaklasim(n)} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "1px solid " + (yaklasim === n ? yakRenk(n) : "#d1d5db"), background: yaklasim === n ? yakRenk(n) : "#fff", color: yaklasim === n ? "#fff" : "#374151", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>{n}</button>

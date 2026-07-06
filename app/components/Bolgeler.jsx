@@ -5,6 +5,9 @@ import { ChevronRight } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { NUF_RENK, fmt } from "../../lib/format";
 import KapsamSokaklar from "./KapsamSokaklar";
+import DemografiPano from "./DemografiPano";
+import { Building2, Map, ChevronRight as ChevronRightIc } from "lucide-react";
+import { sokakGrupBol } from "./EkipAtama";
 
 export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
   const [liste, setListe] = useState(null);
@@ -14,6 +17,7 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
   const [nufMah, setNufMah] = useState(null);
   const [digerMahAcik, setDigerMahAcik] = useState(false);
   const [topluMesgul, setTopluMesgul] = useState(null);
+  const [mahStat, setMahStat] = useState(null); // mahalle demografisi (mv_mahalle_ozet + cinsiyet) -> DemografiPano
 
   async function grupYenile(bIds) {
     const gMap = {};
@@ -81,6 +85,27 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
     })();
   }, [mahalle.id]);
 
+  // Mahalle demografisi (yaş MV'den, cinsiyet ham kisi'den ilk-harf sayımıyla) -> DemografiPano
+  useEffect(() => {
+    setMahStat(null);
+    (async () => {
+      const [{ data: mo }, eR, kR] = await Promise.all([
+        supabase.from("mv_mahalle_ozet").select("kisi,hane,uye,y1824,y2534,y3544,y4554,y5564,y65").eq("mahalle_id", mahalle.id).single(),
+        supabase.from("kisi").select("*", { count: "exact", head: true }).eq("mahalle_id", mahalle.id).ilike("cinsiyet", "e%"),
+        supabase.from("kisi").select("*", { count: "exact", head: true }).eq("mahalle_id", mahalle.id).ilike("cinsiyet", "k%"),
+      ]);
+      setMahStat({
+        kisi: mo?.kisi || 0, hane: mo?.hane || 0, uye: mo?.uye || 0,
+        erkek: eR?.count || 0, kadin: kR?.count || 0,
+        yasArr: [
+          { ad: "18-24", deger: mo?.y1824 || 0 }, { ad: "25-34", deger: mo?.y2534 || 0 },
+          { ad: "35-44", deger: mo?.y3544 || 0 }, { ad: "45-54", deger: mo?.y4554 || 0 },
+          { ad: "55-64", deger: mo?.y5564 || 0 }, { ad: "65+", deger: mo?.y65 || 0 },
+        ],
+      });
+    })();
+  }, [mahalle.id]);
+
   const nufMahDag = useMemo(() => {
     const arr = (nufMah || []).map((r) => ({ ad: r.nufus_il, deger: r.kisi }));
     const toplam = arr.reduce((a, x) => a + x.deger, 0);
@@ -118,8 +143,13 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
           );
         })()}
       </div>
-      <div className="mahalle-grid">
-      <div className="panel" style={{ flex: 1, minWidth: 0 }}><div className="cards">
+      <DemografiPano
+        stat={mahStat || { kisi: tKisi, hane: tHane, uye: tUye, erkek: 0, kadin: 0, yasArr: [] }}
+        ekstra={{ ic: <Map size={15} />, lbl: "Bölge", num: fmt(liste.length), meta: `${fmt(sokakSay)} sokak · ${grupTop} grup`, renk: "#9333ea" }}
+        mahalleIds={[mahalle.id]}
+        baslik={`${mahalle.ad} Mahallesi`}
+      />
+      <div className="panel" style={{ marginTop: 15 }}><div className="cards">
         {liste.map((b) => {
           const gs = (grupMap[b.id] || []).filter((g) => (g.hane || 0) > 0 || (g.kisi || 0) > 0);
           if (gs.length) {
@@ -167,109 +197,6 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
           );
         })}
       </div></div>
-      <aside className="ozet-aside">
-        <div className="panel" style={{ padding: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>Özet</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            {[["Bölge", fmt(liste.length)], [mahalle.tip === "site" ? "Site/Sokak" : "Sokak", fmt(sokakSay)], ["Hane", fmt(tHane)], ["Kişi", fmt(tKisi)]].map(([l, v]) => (
-              <div key={l}><div style={{ fontSize: 21, fontWeight: 800 }}>{v}</div><div style={{ fontSize: 12, color: "var(--ink2)" }}>{l}</div></div>
-            ))}
-          </div>
-        </div>
-        <div className="panel" style={{ padding: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Üyelik</div>
-          <div style={{ position: "relative" }}>
-            <ResponsiveContainer width="100%" height={170}>
-              <PieChart>
-                <Pie data={uyeData} dataKey="value" innerRadius={52} outerRadius={78} paddingAngle={2} stroke="none">
-                  <Cell fill="var(--accent2)" /><Cell fill="#e5e9f0" />
-                </Pie>
-                <Tooltip formatter={(v) => fmt(v)} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-              <div style={{ fontSize: 25, fontWeight: 800, color: "var(--accent2)" }}>%{uyePct}</div>
-              <div style={{ fontSize: 11, color: "var(--ink2)" }}>üye</div>
-            </div>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 6 }}>
-            <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "var(--accent2)", marginRight: 6 }} />Üye <b>{fmt(tUye)}</b></span>
-            <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#e5e9f0", marginRight: 6 }} />Değil <b>{fmt(uyeDegil)}</b></span>
-          </div>
-        </div>
-        {nufMahDag.ilSay > 0 && (
-          <div className="panel" style={{ padding: 16 }}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>Nüfus İli</div>
-            <div style={{ fontSize: 12, color: "var(--ink2)", marginBottom: 6 }}>{fmt(nufMahDag.ilSay)} il · {fmt(nufMahDag.toplam)} kişi</div>
-            <ResponsiveContainer width="100%" height={158}>
-              <PieChart>
-                <Pie data={nufMahDag.arr} dataKey="deger" nameKey="ad" cx="50%" cy="50%" innerRadius={42} outerRadius={70} paddingAngle={1} stroke="#fff" strokeWidth={1}>
-                  {nufMahDag.arr.map((e, i) => <Cell key={i} fill={e.ad === "Diğer" ? "#94a3b8" : NUF_RENK[i % NUF_RENK.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v, n) => [fmt(v) + " kişi", n]} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
-              {nufMahDag.arr.map((e, i) => {
-                const diger = e.ad === "Diğer";
-                return (
-                  <div key={i} onClick={diger ? () => setDigerMahAcik((v) => !v) : undefined}
-                    style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, cursor: diger ? "pointer" : "default" }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 3, background: diger ? "#94a3b8" : NUF_RENK[i % NUF_RENK.length], flex: "0 0 auto" }} />
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textDecoration: diger ? "underline dotted" : "none" }}>
-                      {e.ad}{diger ? ` (${e.detay.length} il ▾)` : ""}
-                    </span>
-                    <b className="mono">{fmt(e.deger)}</b>
-                  </div>
-                );
-              })}
-            </div>
-            {digerMahAcik && (() => {
-              const dg = nufMahDag.arr.find((x) => x.ad === "Diğer");
-              if (!dg) return null;
-              return (
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #eef2f7", display: "flex", flexDirection: "column", gap: 3, maxHeight: 220, overflowY: "auto" }}>
-                  {dg.detay.map((x, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.ad}</span>
-                      <b className="mono">{fmt(x.deger)}</b>
-                    </div>
-                  ))}
-                </div>
-              );
-            })()}
-          </div>
-        )}
-        <div className="panel" style={{ padding: 16 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Atama durumu</div>
-          {grupTop > 0 ? (
-            <>
-              <div style={{ position: "relative" }}>
-                <ResponsiveContainer width="100%" height={170}>
-                  <PieChart>
-                    <Pie data={atamaData} dataKey="value" innerRadius={52} outerRadius={78} paddingAngle={2} stroke="none">
-                      <Cell fill="var(--ok)" /><Cell fill="#e5e9f0" />
-                    </Pie>
-                    <Tooltip formatter={(v) => fmt(v)} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-                  <div style={{ fontSize: 25, fontWeight: 800, color: "var(--ok)" }}>%{atamaPct}</div>
-                  <div style={{ fontSize: 11, color: "var(--ink2)" }}>atandı</div>
-                </div>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 6 }}>
-                <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "var(--ok)", marginRight: 6 }} />Atandı <b>{fmt(grupAtanan)}</b></span>
-                <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#e5e9f0", marginRight: 6 }} />Kalan <b>{fmt(grupTop - grupAtanan)}</b></span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 8, paddingTop: 8, borderTop: "1px solid #eef2f7" }}><span>Sorumlu atanan grup</span><b>{grupAtanan} / {grupTop}</b></div>
-            </>
-          ) : (
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>{sorumluEtiket} atanan</span><b>{atanan} / {liste.length}</b></div>
-          )}
-        </div>
-      </aside>
-      </div>
     </>
   );
 }
