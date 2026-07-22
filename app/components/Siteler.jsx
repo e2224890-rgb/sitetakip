@@ -200,7 +200,7 @@ export default function Siteler({ profil, sabitMahalle }) {
                             <button
                               onClick={(e) => { e.stopPropagation(); siteSec(s, "yonetim"); }}
                               style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", fontSize: 12, fontWeight: 600, color: "#4338ca", background: "#eef2ff", border: "1px solid #e0e7ff", borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap" }}
-                              title="Blok Sorumlusu · Ana Kademe · Kadın Kolları · Gençlik Kolları">
+                              title="Blok Sorumlusu · Ana Kademe · Kadın Temsilci · Gençlik Temsilci">
                               <Users size={13} /> Yönetim Listesi
                             </button>
                           </div>
@@ -219,7 +219,7 @@ export default function Siteler({ profil, sabitMahalle }) {
           <div className="sd-bas"><div><h3>{secSite.ad}</h3><div className="dim">{secSite.blok_sayisi ?? "?"} blok · {secSite.daire_sayisi ?? "?"} daire · {secSite.adres || ""}</div></div></div>
 
           <div style={{ display: "flex", gap: 4, margin: "4px 0 14px", borderBottom: "1px solid #e5e7eb", flexWrap: "wrap" }}>
-            {[["atama", "Site & Haneler"], ["yonetim", "Site Yönetimi"], ["sorumlu", "Blok Atama"]].map(([k, t]) => (
+            {[["atama", "Site & Haneler"], ["yonetim", "AK Parti Site Temsilciliği Yönetimi"], ["sorumlu", "Blok Atama"]].map(([k, t]) => (
               <button key={k} onClick={() => setSiteTab(k)} style={{ padding: "8px 14px", border: "none", background: "none", borderBottom: "2px solid " + (siteTab === k ? "#2563eb" : "transparent"), color: siteTab === k ? "#2563eb" : "#64748b", fontWeight: 600, fontSize: 14, cursor: "pointer", marginBottom: -1 }}>{t}</button>
             ))}
           </div>

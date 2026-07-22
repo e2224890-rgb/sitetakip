@@ -4,13 +4,13 @@ import { supabase } from "../../lib/supabase";
 import { fmt, oran, yakRenk, normBlok, blokParts } from "../../lib/format";
 import { StickyNote, ClipboardCheck, Boxes, UserCheck, Search } from "lucide-react";
 
-const ROL_ET = { blok_sorumlu: "Blok Sorumlusu", ana_kademe: "Ana Kademe", kadin_kollari: "Kadın Kolları", genclik_kollari: "Gençlik Kolları" };
+const ROL_ET = { blok_sorumlu: "Blok Sorumlusu", ana_kademe: "Ana Kademe Temsilci", kadin_kollari: "Kadın Temsilci", genclik_kollari: "Gençlik Temsilci" };
 const BLOK_ROLLER = Object.keys(ROL_ET);
 
 // Not/ziyaret girenin rolünü okunur etikete çevir (site bağlamında sorumlu = Site Başkanı)
 function rolEtiket(rol, isSite) {
   if (ROL_ET[rol]) return ROL_ET[rol];
-  if (rol === "sorumlu") return isSite ? "Site Başkanı" : "Sorumlu";
+  if (rol === "sorumlu") return isSite ? "Site Temsilcisi" : "Sorumlu";
   if (rol === "koordinator") return "Koordinatör";
   if (rol === "grup_baskani") return "Grup Başkanı";
   if (rol === "il_yonetimi" || rol === "ilce_yonetimi") return "Yönetim";
@@ -299,9 +299,9 @@ export default function BaskanRapor({ profil }) {
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
                 {kart("Toplam Görevli", d.bloklar.length, "#0f172a", "hepsi")}
                 {kart("Blok Sorumlusu", say.blok_sorumlu, "#0369a1", "blok_sorumlu")}
-                {kart("Ana Kademe", say.ana_kademe, "#3730a3", "ana_kademe")}
-                {kart("Kadın Kolları", say.kadin_kollari, "#9d174d", "kadin_kollari")}
-                {kart("Gençlik Kolları", say.genclik_kollari, "#166534", "genclik_kollari")}
+                {kart("Ana Kademe Temsilci", say.ana_kademe, "#3730a3", "ana_kademe")}
+                {kart("Kadın Temsilci", say.kadin_kollari, "#9d174d", "kadin_kollari")}
+                {kart("Gençlik Temsilci", say.genclik_kollari, "#166534", "genclik_kollari")}
                 {d.blokOzet ? (
                   <div style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 10, padding: "10px 14px", minWidth: 150 }}>
                     <div style={{ fontSize: 12, color: "#64748b" }}>Blok sorumlusu (blok)</div>

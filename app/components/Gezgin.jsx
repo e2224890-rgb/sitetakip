@@ -120,23 +120,23 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
         <StatCard ic={<Home size={15} />} lbl="Hane" num={fmt(toplam.hane)} meta="kayıtlı hane" renk="#2563eb" />
         <StatCard ic={<ShieldCheck size={15} />} lbl="AK Parti Üye" num={fmt(toplam.uye)} meta={`%${uyeOran} üyelik`} renk="#16a34a" />
         <div style={{ position: "relative" }} onMouseEnter={() => setBolgeHover(true)} onMouseLeave={() => setBolgeHover(false)}>
-          <StatCard ic={<Map size={15} />} lbl="Bölge" num={fmt(bolgeToplam)} meta={haneBolgeOrt ? `sokak · ort. ${fmt(haneBolgeOrt)} hane/bölge` : "sokak bölgeleri"} renk="#9333ea" />
+          <StatCard ic={<Map size={15} />} lbl="Bölünmüş Sokak" num={fmt(bolgeToplam)} meta={haneBolgeOrt ? `ort. ${fmt(haneBolgeOrt)} hane/birim` : "bölünmüş sokaklar"} renk="#9333ea" />
           {bolgeHover && (
             <div style={{ position: "absolute", top: "100%", left: 0, zIndex: 60, marginTop: 6, width: 320, maxWidth: "88vw", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 14px 40px rgba(15,23,42,.18)", padding: 14, fontSize: 12.5, color: "#334155", lineHeight: 1.55 }}>
               <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 8, color: "#6d28d9" }}>Saha Teşkilat Yapısı</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 10px" }}>
-                <span>Bölge (sokak birimi)</span><b className="mono">{fmt(bolgeToplam)}</b>
+                <span>Bölünmüş Sokak</span><b className="mono">{fmt(bolgeToplam)}</b>
                 <span>Kayıtlı sokak</span><b className="mono">{bolgeBilgi ? fmt(bolgeBilgi.sokak) : "…"}</b>
                 <span>Saha grubu (~150 kişi)</span><b className="mono" style={{ color: "#c2410c" }}>{bolgeBilgi ? fmt(bolgeBilgi.grup) : "…"}</b>
-                <span>Gruplama bekleyen bölge</span><b className="mono" style={{ color: bolgeBilgi && bolgeBilgi.bekleyen > 0 ? "#b45309" : "#15803d" }}>{bolgeBilgi ? fmt(bolgeBilgi.bekleyen) : "…"}</b>
-                <span>Bölge başına ort. seçmen</span><b className="mono">{fmt(kisiBolgeOrt)}</b>
+                <span>Gruplama bekleyen</span><b className="mono" style={{ color: bolgeBilgi && bolgeBilgi.bekleyen > 0 ? "#b45309" : "#15803d" }}>{bolgeBilgi ? fmt(bolgeBilgi.bekleyen) : "…"}</b>
+                <span>Birim başına ort. seçmen</span><b className="mono">{fmt(kisiBolgeOrt)}</b>
                 <span>Grup başına ort. seçmen</span><b className="mono">{grupKisiOrt ? fmt(grupKisiOrt) : "…"}</b>
-                <span>Bölge başına ort. hane</span><b className="mono">{fmt(haneBolgeOrt)}</b>
+                <span>Birim başına ort. hane</span><b className="mono">{fmt(haneBolgeOrt)}</b>
               </div>
               <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #eef2f7", color: "#64748b" }}>
-                <b style={{ color: "#c2410c" }}>Planlama birimi gruptur (~150 seçmen), bölge değildir.</b> Her saha sorumlusu bir gruptan mesuldür; bölgeler ortalama {kisiBolgeOrt ? Math.max(1, Math.round(kisiBolgeOrt / 150)) : 2} saha grubuna ayrılır.{" "}
+                <b style={{ color: "#c2410c" }}>Planlama birimi gruptur (~150 seçmen), bölünmüş sokak değildir.</b> Her saha sorumlusu bir gruptan mesuldür; bölünmüş sokaklar ortalama {kisiBolgeOrt ? Math.max(1, Math.round(kisiBolgeOrt / 150)) : 2} saha grubuna ayrılır.{" "}
                 {bolgeBilgi ? (bolgeBilgi.bekleyen > 0
-                  ? <span style={{ color: "#b45309" }}>{fmt(bolgeBilgi.bekleyen)} bölgenin gruplaması tamamlanmamıştır; ilgili mahallenin "Sokaklar" ekranından gruplandırınız.</span>
+                  ? <span style={{ color: "#b45309" }}>{fmt(bolgeBilgi.bekleyen)} bölünmüş sokağın gruplaması tamamlanmamıştır; ilgili mahallenin "Sokaklar" ekranından gruplandırınız.</span>
                   : <span style={{ color: "#15803d", fontWeight: 600 }}>Seçmen kayıtlı tüm bölgelerin gruplaması tamamlanmıştır. ✓</span>) : ""}
               </div>
             </div>

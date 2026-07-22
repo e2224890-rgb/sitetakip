@@ -45,6 +45,6 @@ export default function RolDagitici({ session }) {
   if (rol === "il_yonetimi" || rol === "ilce_yonetimi") return <Yonetim session={session} profil={profil} />;
   if (rol === "koordinator") return <KoordinatorGorunum session={session} profil={profil} />;
   if (rol === "grup_baskani") return <GrupBaskaniGorunum session={session} profil={profil} />;
-  if (rol === "blok_sorumlu" || rol === "ana_kademe" || rol === "kadin_kollari" || rol === "genclik_kollari") return <BlokSorumluGorunum session={session} profil={profil} />;
+  if (["blok_sorumlu", "ana_kademe", "kadin_kollari", "genclik_kollari", "site_teskilat", "site_sosyal", "site_sekreter"].includes(rol)) return <BlokSorumluGorunum session={session} profil={profil} />;
   return <SahaGorunum session={session} profil={profil} alan="sorumlu_id" baslik="Sorumlu" />;
 }

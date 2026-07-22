@@ -26,9 +26,9 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
   }, [hane.id, hane.tarih]);
   // Rol -> okunur etiket. Site bağlamında "sorumlu" = Site Başkanı.
   const rolEtiket = (rol) => {
-    const blok = { blok_sorumlu: "Blok Sorumlusu", ana_kademe: "Ana Kademe", kadin_kollari: "Kadın Kolları", genclik_kollari: "Gençlik Kolları" };
+    const blok = { blok_sorumlu: "Blok Sorumlusu", ana_kademe: "Ana Kademe Temsilci", kadin_kollari: "Kadın Temsilci", genclik_kollari: "Gençlik Temsilci" };
     if (blok[rol]) return blok[rol];
-    if (rol === "sorumlu") return isSite ? "Site Başkanı" : "Sorumlu";
+    if (rol === "sorumlu") return isSite ? "Site Temsilcisi" : "Sorumlu";
     if (rol === "koordinator") return "Koordinatör";
     if (rol === "grup_baskani") return "Grup Başkanı";
     if (rol === "il_yonetimi" || rol === "ilce_yonetimi") return "Yönetim";

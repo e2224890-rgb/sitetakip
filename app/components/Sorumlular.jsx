@@ -6,11 +6,12 @@ import { oran } from "../../lib/format";
 
 const ROL_SECENEK = [
   ["sorumlu", "Sorumlu"], ["koordinator", "Koordinatör"],
-  ["blok_sorumlu", "Blok Sorumlusu"], ["ana_kademe", "Ana Kademe"],
-  ["kadin_kollari", "Kadın Kolları"], ["genclik_kollari", "Gençlik Kolları"],
+  ["blok_sorumlu", "Blok Sorumlusu"], ["ana_kademe", "Ana Kademe Temsilci"],
+  ["kadin_kollari", "Kadın Temsilci"], ["genclik_kollari", "Gençlik Temsilci"],
+  ["site_teskilat", "Site Teşkilat Sorumlusu"], ["site_sosyal", "Site Sosyal Faaliyet Sorumlusu"], ["site_sekreter", "Site Sekreteri"],
 ];
 const ROL_AD = Object.fromEntries([...ROL_SECENEK, ["ilce_yonetimi", "İlçe Başkanı"], ["il_yonetimi", "İl Başkanı"]]);
-const BLOK_ROL = ["blok_sorumlu", "ana_kademe", "kadin_kollari", "genclik_kollari"];
+const BLOK_ROL = ["blok_sorumlu", "ana_kademe", "kadin_kollari", "genclik_kollari", "site_teskilat", "site_sosyal", "site_sekreter"];
 function rolChipSinif(rol) {
   return rol === "koordinator" ? "k" : rol === "ilce_yonetimi" || rol === "il_yonetimi" ? "i"
     : BLOK_ROL.includes(rol) ? "b" : "s";
@@ -185,7 +186,8 @@ export default function Sorumlular({ profil }) {
                   <option value="">Site seç…</option>
                   {siteListesi.map((s) => <option key={s.id} value={s.id}>{s.ad}</option>)}
                 </select></div>
-              <div className="hf"><label>Blok(lar)</label><input className="inp2" value={yh.blok} onChange={(e) => setYh({ ...yh, blok: e.target.value })} placeholder="Örn: A1 veya A1,A2" /></div>
+              {["blok_sorumlu", "ana_kademe", "kadin_kollari", "genclik_kollari"].includes(yh.rol) &&
+                <div className="hf"><label>Blok(lar)</label><input className="inp2" value={yh.blok} onChange={(e) => setYh({ ...yh, blok: e.target.value })} placeholder="Örn: A1 veya A1,A2" /></div>}
             </>)}
             {!ilceYon && (
               <div className="hf"><label>İlçe</label>
@@ -222,7 +224,7 @@ export default function Sorumlular({ profil }) {
                             </select>}
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 4 }}>
                           {(p.baskanSiteleri || []).map((ad, i) => (
-                            <span key={i} style={{ fontSize: 11, background: "#ffedd5", color: "#9a3412", padding: "1px 7px", borderRadius: 6, fontWeight: 600 }}>Site Başkanı · {ad}</span>
+                            <span key={i} style={{ fontSize: 11, background: "#ffedd5", color: "#9a3412", padding: "1px 7px", borderRadius: 6, fontWeight: 600 }}>Site Temsilcisi · {ad}</span>
                           ))}
                           {BLOK_ROL.includes(p.rol) && p.gorevSite ? <span style={{ fontSize: 11, background: "#e0f2fe", color: "#0369a1", padding: "1px 7px", borderRadius: 6, fontWeight: 600 }}>{p.gorevSite}{p.blok ? " · " + p.blok + " Blok" : ""}</span> : null}
                         </div>

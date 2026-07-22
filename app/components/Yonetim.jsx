@@ -8,6 +8,7 @@ import GrupDetay from "./GrupDetay";
 import Haneler from "./Haneler";
 import IlGeneli from "./IlGeneli";
 import Siteler from "./Siteler";
+import SitelerSkorboard from "./SitelerSkorboard";
 import Sorumlular from "./Sorumlular";
 import BaskanRapor from "./BaskanRapor";
 
@@ -135,7 +136,7 @@ export default function Yonetim({ session, profil }) {
         </>}
 
         <div className="nav-sec">{ilceYon ? "İlçe" : secIlce.ad}</div>
-        <NavBtn id="gezgin" ic={<Compass size={17} />} label="Teşkilat Gezgini" />
+        <NavBtn id="gezgin" ic={<Compass size={17} />} label="İlçe Geneli" />
         <NavBtn id="sorumlular" ic={<Users size={17} />} label="Sorumlular" />
         <NavBtn id="siteler" ic={<MapPin size={17} />} label="Siteler" />
         <NavBtn id="rapor" ic={<ClipboardList size={17} />} label="Başkan Paneli" />
@@ -216,7 +217,7 @@ export default function Yonetim({ session, profil }) {
           </div>
         )}
         {sayfa === "sorumlular" && <Sorumlular profil={profil} />}
-        {sayfa === "siteler" && <Siteler profil={profil} />}
+        {sayfa === "siteler" && <SitelerSkorboard profil={profil} />}
         {sayfa === "rapor" && <BaskanRapor profil={profil} />}
         {sayfa === "yakinda" && (
           <div className="page"><div className="bos-modul"><Boxes size={34} />

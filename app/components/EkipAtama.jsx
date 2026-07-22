@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
 
 export default function EkipAtama({ site }) {
-  const BLOK_ROLLER = [["ana_kademe", "Ana Kademe"], ["kadin_kollari", "Kadın Kolları"], ["genclik_kollari", "Gençlik Kolları"]];
+  const BLOK_ROLLER = [["ana_kademe", "Ana Kademe Temsilci"], ["kadin_kollari", "Kadın Temsilci"], ["genclik_kollari", "Gençlik Temsilci"]];
   const [bloklar, setBloklar] = useState(null);
   const [gorevliler, setGorevliler] = useState([]);
   const [acik, setAcik] = useState(null);

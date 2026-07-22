@@ -175,20 +175,18 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
 
   const demografi = useMemo(() => {
     const ks = (haneler || []).flatMap((h) => h.kisiler);
-    let erkek = 0, kadin = 0, uye = 0;
+    let erkek = 0, kadin = 0;
     const yas = { "18-24": 0, "25-34": 0, "35-44": 0, "45-54": 0, "55-64": 0, "65+": 0 };
     ks.forEach((k) => {
       const c = String(k.cinsiyet || "").toLocaleUpperCase("tr").charAt(0);
       if (c === "E") erkek++; else if (c === "K") kadin++;
-      if (k.uye) uye++;
       if (k.dogum_yili) {
         const a = 2026 - k.dogum_yili;
         if (a < 25) yas["18-24"]++; else if (a < 35) yas["25-34"]++; else if (a < 45) yas["35-44"]++;
         else if (a < 55) yas["45-54"]++; else if (a < 65) yas["55-64"]++; else yas["65+"]++;
       }
     });
-    const secmen = ks.length;
-    return { erkek, kadin, toplam: erkek + kadin, secmen, uye, uyeDegil: Math.max(0, secmen - uye), yasArr: Object.entries(yas).map(([ad, deger]) => ({ ad, deger })) };
+    return { erkek, kadin, toplam: erkek + kadin, yasArr: Object.entries(yas).map(([ad, deger]) => ({ ad, deger })) };
   }, [haneler]);
 
   const nufBloklar = useMemo(() => {
@@ -243,7 +241,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
             ? <span className="tag" style={{ background: grupAd ? "var(--ok-weak)" : "var(--surface2)", color: grupAd ? "var(--ok)" : "var(--ink2)", borderColor: grupAd ? "#9ccfc7" : "var(--border)" }}><UserCheck size={13} /> Sorumlu: {grupAd || "atanmadı"}</span>
             : yonetici && <span className="tag" style={{ background: sorumluId ? "var(--ok-weak)" : "var(--surface2)", color: sorumluId ? "var(--ok)" : "var(--ink2)", borderColor: sorumluId ? "#9ccfc7" : "var(--border)" }}>
             <UserCheck size={13} /> {isSite ? "AK Parti Site Başkanı" : "Sorumlu"}: {sorumluId ? (adById[sorumluId] || "atandı") : "atanmadı"}</span>}
-          <span className="tag"><Users size={13} /> {fmt(tHane)} hane · {fmt(kSay)} seçmen</span>
+          <span className="tag"><Users size={13} /> {fmt(tHane)} hane · {fmt(kSay)} kişi</span>
         </div></div>
 
       {grup && <GrupBaskanPanel grup={grup} onAtandi={(id, ad) => setGrupAd(ad || "")} />}
@@ -314,7 +312,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
       {haneler && haneler.length > 0 && (
         <div className="demo-grid">
           <div className="panel pad">
-            <div className="panel-h2"><h3>{on}Yaş Aralığı</h3><span className="dim">{fmt(demografi.toplam)} seçmen</span></div>
+            <div className="panel-h2"><h3>{on}Yaş Aralığı</h3><span className="dim">{fmt(demografi.toplam)} kişi</span></div>
             <ResponsiveContainer width="100%" height={190}>
               <BarChart data={demografi.yasArr} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
                 <XAxis dataKey="ad" tick={{ fontSize: 11, fill: "#5a626c" }} axisLine={false} tickLine={false} />
@@ -325,7 +323,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
             </ResponsiveContainer>
           </div>
           <div className="panel pad">
-            <div className="panel-h2"><h3>{on}Cinsiyet Oranı</h3><span className="dim">{fmt(demografi.toplam)} seçmen</span></div>
+            <div className="panel-h2"><h3>{on}Cinsiyet Oranı</h3><span className="dim">{fmt(demografi.toplam)} kişi</span></div>
             <div className="cins">
               <div className="cins-satir">
                 <span className="cins-ad"><span className="dot" style={{ background: "#2563eb" }} /> Erkek</span>
@@ -338,38 +336,12 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
               <div className="cins-ozet">Erkek %{oran(demografi.erkek, demografi.toplam)} · Kadın %{oran(demografi.kadin, demografi.toplam)}</div>
             </div>
           </div>
-          <div className="panel pad">
-            <div className="panel-h2"><h3>{on}Üye Oranı</h3><span className="dim">{fmt(demografi.secmen)} seçmen</span></div>
-            <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 6 }}>
-              <div style={{ position: "relative", width: 130, height: 130, flex: "0 0 auto" }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={[{ ad: "Üye", v: demografi.uye }, { ad: "Üye değil", v: demografi.uyeDegil }]} dataKey="v" nameKey="ad" cx="50%" cy="50%" innerRadius={42} outerRadius={62} paddingAngle={1} stroke="#fff" strokeWidth={1}>
-                      <Cell fill="#cf5a26" /><Cell fill="#e7e9ed" />
-                    </Pie>
-                    <Tooltip formatter={(v, n) => [fmt(v) + " seçmen", n]} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: "#cf5a26" }}>%{oran(demografi.uye, demografi.secmen)}</div>
-                  <div style={{ fontSize: 10, color: "var(--ink2)" }}>üye</div>
-                </div>
-              </div>
-              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                  <span><span className="dot" style={{ background: "#cf5a26" }} /> Üye</span><b className="mono">{fmt(demografi.uye)}</b></div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                  <span><span className="dot" style={{ background: "#e7e9ed" }} /> Üye değil</span><b className="mono">{fmt(demografi.uyeDegil)}</b></div>
-                <div style={{ fontSize: 12, color: "var(--ink2)", marginTop: 2, paddingTop: 8, borderTop: "1px solid #eef2f7" }}>Potansiyel: <b>{fmt(demografi.uyeDegil)}</b> seçmen henüz üye değil</div>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
       {haneler && haneler.length > 0 && nufusDagilim.ilSay > 0 && (
         <div className="panel pad" style={{ marginBottom: 14 }}>
-          <div className="panel-h2"><h3>{on}Nüfus İl Dağılımı{nufBlok ? ` · ${nufBlok} blok` : ""}</h3><span className="dim">{fmt(nufusDagilim.ilSay)} il · {fmt(nufusDagilim.toplam)} seçmen</span></div>
+          <div className="panel-h2"><h3>{on}Nüfus İl Dağılımı{nufBlok ? ` · ${nufBlok} blok` : ""}</h3><span className="dim">{fmt(nufusDagilim.ilSay)} il · {fmt(nufusDagilim.toplam)} kişi</span></div>
           {isSite && nufBloklar.length > 1 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "2px 0 10px" }}>
               <button onClick={() => { setNufBlok(""); setDigerAcik(false); }}
@@ -442,7 +414,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
             )}
             <button className="btn" onClick={() => csvIndir({ kod: birim.kod }, suzulmus)}><Download size={14} /> CSV</button>
             <div className="searchbox"><Search size={13} />
-              <input placeholder="Hane / seçmen ara…" value={ara} onChange={(e) => setAra(e.target.value)} /></div>
+              <input placeholder="Hane / kişi ara…" value={ara} onChange={(e) => setAra(e.target.value)} /></div>
           </div></div>
         {haneler === null ? <div className="merkez">Yükleniyor…</div>
           : suzulmus.length === 0 ? <div className="merkez">Kayıt yok.</div> : (
