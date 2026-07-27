@@ -2,7 +2,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
 import { fmt, oran, yakRenk, normBlok, blokParts } from "../../lib/format";
-import { StickyNote, ClipboardCheck, Boxes, UserCheck, Search } from "lucide-react";
+import { yaklasimBilgi, ILCE_BASKANI, MAHALLE_TESKILAT, MAHALLE_NUFUS } from "../../lib/constants";
+import { StickyNote, ClipboardCheck, Boxes, UserCheck, Search, LayoutDashboard, TrendingUp, Network, AlertTriangle, Users, Home, ShieldCheck, MapPin } from "lucide-react";
+import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 
 const ROL_ET = { blok_sorumlu: "Blok Sorumlusu", ana_kademe: "Ana Kademe Temsilci", kadin_kollari: "Kadın Temsilci", genclik_kollari: "Gençlik Temsilci" };
 const BLOK_ROLLER = Object.keys(ROL_ET);
@@ -46,8 +48,9 @@ function haneEtiket(h) {
 
 export default function BaskanRapor({ profil }) {
   const [ilceId, setIlceId] = useState(null);
-  const [tab, setTab] = useState("notlar");
+  const [tab, setTab] = useState("ozet");
   const [ara, setAra] = useState("");
+  const [mahFiltre, setMahFiltre] = useState(""); // "" = tüm ilçe, yoksa mahalle_id
   const [yuk, setYuk] = useState({});      // { tab: true } -> yüklendi
   const [mesgul, setMesgul] = useState(false);
   const [mahAd, setMahAd] = useState({});  // mahalle_id -> ad
@@ -62,17 +65,41 @@ export default function BaskanRapor({ profil }) {
   })(); }, []);
 
   useEffect(() => { if (ilceId && !yuk[tab]) yukle(tab); }, [ilceId, tab]);
+  // Eksikler sekmesi blok + site sorumlusu verisine dayanır — ikisini de yükle
+  useEffect(() => { if (ilceId && tab === "eksik") { if (!yuk["bloklar"]) yukle("bloklar"); if (!yuk["siteSor"]) yukle("siteSor"); } }, [ilceId, tab]);
 
   async function yukle(t) {
     setMesgul(true);
     try {
-      if (t === "notlar") {
+      if (t === "ozet" || t === "ilerleme" || t === "eksik") {
+        // Ziyaret/hane: rapor view'larından (kolonlar: toplam, edilen, mahalle_id)
+        // Seçmen/üye: mv_mahalle_ozet'ten (mahalle bazında hazır)
+        const [sk, st, mo, mahL] = await Promise.all([
+          supabase.from("v_rapor_sokak").select("*").eq("ilce_id", ilceId),
+          supabase.from("v_rapor_site").select("*").eq("ilce_id", ilceId),
+          supabase.from("mv_mahalle_ozet").select("mahalle_id, kisi, hane, uye"),
+          supabase.from("mahalle").select("id, ad").eq("ilce_id", ilceId),
+        ]);
+        const adOf = {}; (mahL.data || []).forEach((m) => { adOf[m.id] = m.ad; });
+        const mm = {};
+        const g = (id) => (mm[id] ||= { mahalle_id: id, ad: adOf[id] || mahAd[id] || "—", hane: 0, kisi: 0, uye: 0, ziyaret: 0, site: 0, sokak: 0 });
+        // ziyaret + hane (rapor view'larından)
+        (sk.data || []).forEach((r) => { if (!r.mahalle_id) return; const x = g(r.mahalle_id); x.ziyaret += r.edilen || 0; x.sokak += 1; });
+        (st.data || []).forEach((r) => { if (!r.mahalle_id) return; const x = g(r.mahalle_id); x.ziyaret += r.edilen || 0; x.site += 1; });
+        // seçmen/üye/hane (mv_mahalle_ozet — asıl kaynak)
+        (mo.data || []).forEach((r) => { if (!r.mahalle_id) return; const x = g(r.mahalle_id); x.kisi = r.kisi || 0; x.uye = r.uye || 0; x.hane = r.hane || 0; });
+        const mahOzet = Object.values(mm).filter((x) => x.kisi || x.hane).sort((a, b) => b.kisi - a.kisi);
+        const toplam = mahOzet.reduce((a, x) => ({
+          hane: a.hane + x.hane, kisi: a.kisi + x.kisi, uye: a.uye + x.uye, ziyaret: a.ziyaret + x.ziyaret,
+        }), { hane: 0, kisi: 0, uye: 0, ziyaret: 0 });
+        setD((s) => ({ ...s, mahOzet, genelToplam: toplam }));
+      } else if (t === "notlar") {
         let q = supabase.from("ziyaret").select("hane_id, not_, tarih, yaklasim, kapsam, kullanici_id")
           .not("not_", "is", null).neq("not_", "").order("tarih", { ascending: false }).limit(500);
         if (ilceId) q = q.eq("ilce_id", ilceId);
         const { data: nt } = await q;
         const notlar = nt || [];
-        const haneler = await parcaliIn("hane", "id, adres, kapi_no, kapi_blok, no, site_kayit_id", notlar.map((n) => n.hane_id));
+        const haneler = await parcaliIn("hane", "id, adres, kapi_no, kapi_blok, no, site_kayit_id, mahalle_id", notlar.map((n) => n.hane_id));
         const hBy = {}; haneler.forEach((h) => { hBy[h.id] = h; });
         // hanelerin site adları
         const siteIds = [...new Set(haneler.map((h) => h.site_kayit_id).filter(Boolean))];
@@ -141,15 +168,23 @@ export default function BaskanRapor({ profil }) {
   }
 
   const TABS = [
-    ["notlar", "Notlar", <StickyNote size={15} key="a" />],
-    ["ziyaret", "Ziyaretler", <ClipboardCheck size={15} key="b" />],
-    ["bloklar", "Bloklar & Sorumlular", <Boxes size={15} key="c" />],
-    ["siteSor", "Site Sorumluları", <UserCheck size={15} key="d" />],
+    ["ozet", "Genel Özet", <LayoutDashboard size={15} key="z" />],
+    ["ilerleme", "Saha İlerleme", <TrendingUp size={15} key="e" />],
+    ["notlar", "Notlar & Yaklaşım", <StickyNote size={15} key="a" />],
+    ["teskilat", "Teşkilat", <Network size={15} key="f" />],
+    ["eksik", "Eksikler & Uyarılar", <AlertTriangle size={15} key="g" />],
   ];
   const [siteFiltre, setSiteFiltre] = useState("hepsi"); // hepsi | atanan | atanmayan
   const [blokFiltre, setBlokFiltre] = useState("hepsi"); // hepsi | blok_sorumlu | ana_kademe | kadin_kollari | genclik_kollari
   const [acikMah, setAcikMah] = useState(() => new Set()); // ziyaret kırılımında açık mahalleler
   const f = ara.trim().toLocaleLowerCase("tr");
+  // Mahalle filtresi — seçiliyse tüm veriyi o mahalleye indir
+  const mahOzetF = mahFiltre ? (d.mahOzet || []).filter((m) => m.mahalle_id === mahFiltre) : (d.mahOzet || []);
+  const notlarF = mahFiltre ? (d.notlar || []).filter((n) => n.hane?.mahalle_id === mahFiltre) : (d.notlar || []);
+  const bosBloklarF = mahFiltre ? (d.bosBloklar || []).filter((b) => b.mahalle_id === mahFiltre) : (d.bosBloklar || []);
+  const siteSorF = mahFiltre ? (d.siteSor || []).filter((s) => s.mahalle_id === mahFiltre) : (d.siteSor || []);
+  const dF = { ...d, mahOzet: mahOzetF, notlar: notlarF, bosBloklar: bosBloklarF, siteSor: siteSorF };
+  const mahAdiSecili = mahFiltre ? (mahAd[mahFiltre] || "") : "";
   const mahToggle = (k) => setAcikMah((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   return (
@@ -170,6 +205,25 @@ export default function BaskanRapor({ profil }) {
         ))}
       </div>
 
+      {/* mahalle seçici */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: "#475569" }}>Kapsam:</span>
+        <select value={mahFiltre} onChange={(e) => setMahFiltre(e.target.value)}
+          style={{ padding: "7px 12px", border: "1px solid #d1d5db", borderRadius: 9, fontSize: 13.5, fontWeight: 600, background: "#fff", color: "#0f172a", cursor: "pointer", minWidth: 200 }}>
+          <option value="">Tüm İlçe (Başakşehir)</option>
+          {Object.entries(mahAd)
+            .filter(([, ad]) => MAHALLE_NUFUS[String(ad).trim()] != null) // sadece tanımlı 10 mahalle
+            .sort((a, b) => a[1].localeCompare(b[1], "tr")).map(([id, ad]) => (
+            <option key={id} value={id}>{ad}</option>
+          ))}
+        </select>
+        {mahFiltre && (
+          <button onClick={() => setMahFiltre("")} style={{ fontSize: 12.5, color: "#c2410c", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "6px 11px", cursor: "pointer", fontWeight: 600 }}>
+            Tüm ilçeye dön
+          </button>
+        )}
+      </div>
+
       {/* arama */}
       <div style={{ position: "relative", marginBottom: 12, maxWidth: 420 }}>
         <Search size={15} style={{ position: "absolute", left: 11, top: 10, color: "#94a3b8" }} />
@@ -179,230 +233,506 @@ export default function BaskanRapor({ profil }) {
 
       {mesgul && <div style={{ color: "#64748b", fontSize: 13, padding: 8 }}>Yükleniyor…</div>}
 
-      {/* ---- NOTLAR ---- */}
-      {tab === "notlar" && !mesgul && (
-        <div>
-          <div style={{ fontSize: 13, color: "#64748b", marginBottom: 8 }}>{d.notlar.length} not (son 500)</div>
-          {d.notlar.filter((n) => !f || (n.not_ || "").toLocaleLowerCase("tr").includes(f) || haneEtiket(n.hane).toLocaleLowerCase("tr").includes(f)).map((n, i) => (
-            <div key={i} style={{ border: "1px solid #eef2f7", borderRadius: 10, padding: "10px 13px", marginBottom: 8, background: "#fff" }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
-                <b style={{ fontSize: 13.5 }}>{haneEtiket(n.hane)}</b>
-                {n.siteAd ? <span style={{ fontSize: 12, background: "#f5f3ff", color: "#6d28d9", padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{n.siteAd}</span> : null}
-                {n.yaklasim ? <span style={{ fontSize: 12, fontWeight: 700, color: yakRenk(n.yaklasim) }}>Yaklaşım {n.yaklasim}/5</span> : null}
-                {n.kapsam ? <span style={{ fontSize: 12, background: "#eef2ff", color: "#3730a3", padding: "1px 8px", borderRadius: 6 }}>{n.kapsam}</span> : null}
-                {n.kisi ? (() => { const rk = rolRenk(n.kisi.rol); return <span style={{ fontSize: 12, background: rk.bg, color: rk.fg, padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{n.kisi.ad_soyad || n.kisi.eposta} · {rolEtiket(n.kisi.rol, !!n.hane?.site_kayit_id)}</span>; })() : null}
-                <span style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>{n.tarih ? new Date(n.tarih).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</span>
-              </div>
-              <div style={{ fontSize: 13.5, color: "#334155" }}>{n.not_}</div>
-            </div>
-          ))}
-          {d.notlar.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: 12 }}>Henüz not girilmemiş.</div>}
-        </div>
-      )}
-
-      {/* ---- ZİYARETLER ---- */}
-      {tab === "ziyaret" && !mesgul && (() => {
-        const tumSok = d.sokak, tumSit = d.site;
-        // Üst kart: gerçek hane (çift saymayan). Yoksa view toplamına düş.
-        const viewT = [...tumSok, ...tumSit].reduce((a, r) => ({ t: a.t + (r.toplam || 0), e: a.e + (r.edilen || 0) }), { t: 0, e: 0 });
-        const gt = { t: d.gercekToplam ?? viewT.t, e: d.gercekEdilen ?? viewT.e };
-        const grupla = (arr, adKey) => {
-          const g = {};
-          arr.filter((r) => !f || (r[adKey] || "").toLocaleLowerCase("tr").includes(f) || (mahAd[r.mahalle_id] || "").toLocaleLowerCase("tr").includes(f))
-            .forEach((r) => { (g[r.mahalle_id] = g[r.mahalle_id] || []).push(r); });
-          return g;
-        };
-        const cubuk = (pct) => (
-          <div style={{ width: 120, height: 7, background: "#eef2f7", borderRadius: 4, overflow: "hidden", flex: "0 0 auto" }}>
-            <div style={{ width: pct + "%", height: "100%", background: pct >= 80 ? "#16a34a" : pct >= 40 ? "#eab308" : "#f97316" }} />
+      {/* ---- GENEL ÖZET ---- */}
+      {tab === "ozet" && !mesgul && (() => {
+        const t = mahFiltre
+          ? (mahOzetF[0] || { hane: 0, kisi: 0, uye: 0, ziyaret: 0 })
+          : (dF.genelToplam || { hane: 0, kisi: 0, uye: 0, ziyaret: 0 });
+        const uyeOran = oran(t.uye, t.kisi), ziyOran = oran(t.ziyaret, t.hane);
+        const kart = (ikon, etiket, deger, alt, renk) => (
+          <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px", flex: "1 1 170px", minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, color: renk, marginBottom: 6 }}>{ikon}<span style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>{etiket}</span></div>
+            <div style={{ fontSize: 26, fontWeight: 800, color: "#0f172a" }}>{deger}</div>
+            {alt && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>{alt}</div>}
           </div>
         );
-        const Blok = ({ baslik, arr, adKey, tur }) => {
-          const g = grupla(arr, adKey);
-          const mahListe = Object.entries(g)
-            .map(([mid, satirlar]) => {
-              const mt = satirlar.reduce((a, r) => ({ t: a.t + (r.toplam || 0), e: a.e + (r.edilen || 0) }), { t: 0, e: 0 });
-              return { mid, satirlar, ...mt };
-            })
-            .sort((a, b) => b.t - a.t);
-          return (
-            <div style={{ marginBottom: 20 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 800, margin: "0 0 10px", display: "flex", alignItems: "center", gap: 8 }}>
-                {baslik} <span style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8" }}>({mahListe.length} mahalle)</span>
-              </h3>
-              {mahListe.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13 }}>Kayıt yok.</div>}
-              {mahListe.map(({ mid, satirlar, t, e }) => {
-                const anahtar = tur + ":" + mid;
-                const acik = acikMah.has(anahtar) || !!f; // arama varken hepsi açık
-                const pct = oran(e, t);
-                return (
-                  <div key={mid} style={{ border: "1px solid #eef2f7", borderRadius: 12, marginBottom: 10, overflow: "hidden", background: "#fff" }}>
-                    <button onClick={() => mahToggle(anahtar)}
-                      style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", background: acik ? "#f8fafc" : "#fff", border: "none", borderBottom: acik ? "1px solid #eef2f7" : "none", cursor: "pointer", textAlign: "left" }}>
-                      <span style={{ fontSize: 12, color: "#94a3b8", width: 14 }}>{acik ? "▾" : "▸"}</span>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: "#c2410c", flex: 1, minWidth: 0 }}>{mahAd[mid] || "—"}</span>
-                      <span style={{ fontSize: 12, color: "#94a3b8" }}>{fmt(satirlar.length)} {tur === "sokak" ? "sokak" : "site"}</span>
-                      {cubuk(pct)}
-                      <span style={{ fontSize: 12, color: "#475569", width: 118, textAlign: "right", fontWeight: 600 }}>{fmt(e)} / {fmt(t)} · %{pct}</span>
-                    </button>
-                    {acik && (
-                      <div style={{ padding: "4px 14px 8px" }}>
-                        {satirlar.sort((a, b) => (b.toplam || 0) - (a.toplam || 0)).map((r, i) => {
-                          const p = oran(r.edilen || 0, r.toplam || 0);
-                          return (
-                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", borderBottom: "1px solid #f3f4f6" }}>
-                              <span style={{ flex: 1, fontSize: 13, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#334155" }}>{r[adKey] || "—"}</span>
-                              {cubuk(p)}
-                              <span style={{ fontSize: 12, color: "#475569", width: 118, textAlign: "right" }}>{fmt(r.edilen || 0)} / {fmt(r.toplam || 0)} · %{p}</span>
-                            </div>
-                          );
-                        })}
+        return (
+          <div>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+              {kart(<Users size={16} />, "Toplam Seçmen", fmt(t.kisi), `${fmt((dF.mahOzet || []).length)} mahalle`, "#2563eb")}
+              {kart(<Home size={16} />, "Hane", fmt(t.hane), null, "#7c3aed")}
+              {kart(<ShieldCheck size={16} />, "AK Parti Üye", fmt(t.uye), `%${uyeOran} üyelik`, "#16a34a")}
+              {kart(<ClipboardCheck size={16} />, "Ziyaret Edilen", fmt(t.ziyaret), `%${ziyOran} hane`, "#ea580c")}
+            </div>
+            <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12 }}>Seçmen ve Üye — mahalle bazında</div>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={(dF.mahOzet || []).map((m) => ({ ad: m.ad.length > 10 ? m.ad.slice(0, 9) + "…" : m.ad, tamAd: m.ad, secmen: m.kisi, uye: m.uye }))} margin={{ top: 5, right: 8, left: 4, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="ad" tick={{ fontSize: 11, fill: "#64748b" }} angle={-35} textAnchor="end" height={50} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} tickFormatter={(v) => v >= 1000 ? (v / 1000).toFixed(0) + "b" : v} />
+                  <Tooltip formatter={(v, n) => [fmt(v), n === "secmen" ? "Seçmen" : "Üye"]} labelFormatter={(l, p) => p?.[0]?.payload?.tamAd || l} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => v === "secmen" ? "Seçmen" : "Üye"} />
+                  <Bar dataKey="secmen" fill="#93c5fd" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                  <Bar dataKey="uye" fill="#16a34a" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, overflow: "hidden" }}>
+              <div style={{ padding: "11px 15px", borderBottom: "1px solid #eef2f7", fontWeight: 800, fontSize: 14 }}>Mahalle Kırılımı</div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 620 }}>
+                  <thead><tr style={{ background: "#f8fafc", color: "#475569", textAlign: "right" }}>
+                    <th style={{ textAlign: "left", padding: "9px 15px" }}>Mahalle</th>
+                    <th style={{ padding: "9px 10px" }}>Seçmen</th><th style={{ padding: "9px 10px" }}>Hane</th>
+                    <th style={{ padding: "9px 10px" }}>Üye</th><th style={{ padding: "9px 10px" }}>Üyelik %</th>
+                    <th style={{ padding: "9px 10px" }}>Ziyaret</th><th style={{ padding: "9px 15px" }}>Ziyaret %</th>
+                  </tr></thead>
+                  <tbody>
+                    {(dF.mahOzet || []).map((m) => {
+                      const uo = oran(m.uye, m.kisi), zo = oran(m.ziyaret, m.hane);
+                      return (
+                        <tr key={m.mahalle_id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "9px 15px", fontWeight: 700 }}>{m.ad}</td>
+                          <td style={{ padding: "9px 10px", textAlign: "right" }}>{fmt(m.kisi)}</td>
+                          <td style={{ padding: "9px 10px", textAlign: "right" }}>{fmt(m.hane)}</td>
+                          <td style={{ padding: "9px 10px", textAlign: "right", color: "#16a34a", fontWeight: 700 }}>{fmt(m.uye)}</td>
+                          <td style={{ padding: "9px 10px", textAlign: "right" }}>%{uo}</td>
+                          <td style={{ padding: "9px 10px", textAlign: "right" }}>{fmt(m.ziyaret)}</td>
+                          <td style={{ padding: "9px 15px", textAlign: "right" }}>
+                            <span style={{ display: "inline-block", minWidth: 42, padding: "2px 8px", borderRadius: 999, fontWeight: 700, fontSize: 12,
+                              background: zo >= 50 ? "#dcfce7" : zo >= 20 ? "#fef9c3" : "#fee2e2",
+                              color: zo >= 50 ? "#166534" : zo >= 20 ? "#854d0e" : "#991b1b" }}>%{zo}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ---- SAHA İLERLEME ---- */}
+      {tab === "ilerleme" && !mesgul && (() => {
+        const rows = (dF.mahOzet || []).slice().sort((a, b) => oran(b.ziyaret, b.hane) - oran(a.ziyaret, a.hane));
+        const grafik = rows.map((m) => ({
+          ad: m.ad.length > 10 ? m.ad.slice(0, 9) + "…" : m.ad, tamAd: m.ad,
+          ziyaret: oran(m.ziyaret, m.hane), uyelik: oran(m.uye, m.kisi),
+          uye: m.uye, kisi: m.kisi,
+        }));
+        const RENK = ["#2563eb", "#16a34a", "#ea580c", "#7c3aed", "#dc2626", "#0891b2", "#ca8a04", "#db2777", "#059669", "#4f46e5"];
+        const uyePasta = rows.map((m, i) => ({ ad: m.ad, deger: m.uye, renk: RENK[i % RENK.length] }));
+        const bar = (deger, renk) => (
+          <div style={{ background: "#f1f5f9", borderRadius: 999, height: 10, overflow: "hidden", flex: 1 }}>
+            <div style={{ width: `${Math.min(100, deger)}%`, height: "100%", background: renk, borderRadius: 999 }} />
+          </div>
+        );
+        return (
+          <div style={{ display: "grid", gap: 12 }}>
+            {/* Grafik 1: Ziyaret + Üyelik oranı bar chart */}
+            <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12 }}>Ziyaret & Üyelik Oranı (%) — mahalle bazında</div>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={grafik} margin={{ top: 5, right: 8, left: -18, bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                  <XAxis dataKey="ad" tick={{ fontSize: 11, fill: "#64748b" }} angle={-35} textAnchor="end" height={50} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} unit="%" />
+                  <Tooltip formatter={(v, n) => [`%${v}`, n === "ziyaret" ? "Ziyaret" : "Üyelik"]} labelFormatter={(l, p) => p?.[0]?.payload?.tamAd || l} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} formatter={(v) => v === "ziyaret" ? "Ziyaret %" : "Üyelik %"} />
+                  <Bar dataKey="ziyaret" fill="#ea580c" radius={[4, 4, 0, 0]} maxBarSize={30} />
+                  <Bar dataKey="uyelik" fill="#16a34a" radius={[4, 4, 0, 0]} maxBarSize={30} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Grafik 2: Üye dağılımı pasta */}
+            <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12 }}>Üye Dağılımı — mahalleye göre</div>
+              <ResponsiveContainer width="100%" height={280}>
+                <PieChart>
+                  <Pie data={uyePasta} dataKey="deger" nameKey="ad" cx="50%" cy="50%" outerRadius={95} innerRadius={45}
+                    label={(e) => `${e.ad}: ${fmt(e.deger)}`} labelLine={false} style={{ fontSize: 11 }}>
+                    {uyePasta.map((e, i) => <Cell key={i} fill={e.renk} />)}
+                  </Pie>
+                  <Tooltip formatter={(v) => [fmt(v) + " üye", ""]} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Detay bar listeleri */}
+            {["Ziyaret Tamamlanma", "Üyelik Oranı"].map((baslik, gi) => (
+              <div key={gi} style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "13px 16px" }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 12 }}>{baslik} — sıralı</div>
+                <div style={{ display: "grid", gap: 9 }}>
+                  {rows.map((m) => {
+                    const deger = gi === 0 ? oran(m.ziyaret, m.hane) : oran(m.uye, m.kisi);
+                    const renk = gi === 0 ? "#ea580c" : "#16a34a";
+                    return (
+                      <div key={m.mahalle_id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                        <div style={{ width: 130, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.ad}</div>
+                        {bar(deger, renk)}
+                        <div style={{ width: 46, textAlign: "right", fontWeight: 700, color: renk }}>%{deger}</div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* ---- TEŞKİLAT ŞEMASI ---- */}
+      {tab === "teskilat" && !mesgul && (() => {
+        const bas = (ad) => String(ad || "").trim().split(/\s+/).map((p) => p[0] || "").join("").slice(0, 2).toLocaleUpperCase("tr");
+        const kisiSatir = (kisi, gorev) => {
+          const kadin = !!(kisi && kisi.k);
+          const renk = kadin ? { bg: "#fce7f3", fg: "#9d174d" } : { bg: "#e0edff", fg: "#1e40af" };
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 26, height: 26, borderRadius: "50%", flex: "0 0 auto", background: kisi ? renk.bg : "#e5e7eb", color: kisi ? renk.fg : "#9ca3af", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 800 }}>{kisi ? bas(kisi.ad) : "—"}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: kisi ? "#0f172a" : "#94a3b8" }}>{kisi ? kisi.ad : "— atanmadı —"}</div>
+                <div style={{ fontSize: 10.5, color: "#64748b" }}>{gorev}{kisi && kisi.unvan ? ` · ${kisi.unvan}` : ""}</div>
+              </div>
             </div>
           );
         };
         return (
           <div>
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 16 }}>
-              <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 12, padding: "12px 18px" }}>
-                <div style={{ fontSize: 12, color: "#9a3412" }}>Toplam Hane</div><div style={{ fontSize: 22, fontWeight: 800 }}>{fmt(gt.t)}</div></div>
-              <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 12, padding: "12px 18px" }}>
-                <div style={{ fontSize: 12, color: "#065f46" }}>Ziyaret Edilen</div><div style={{ fontSize: 22, fontWeight: 800 }}>{fmt(gt.e)}</div></div>
-              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12, padding: "12px 18px" }}>
-                <div style={{ fontSize: 12, color: "#1e40af" }}>Tamamlanma</div><div style={{ fontSize: 22, fontWeight: 800 }}>%{oran(gt.e, gt.t)}</div></div>
+            <div style={{ background: "#0b2a5b", color: "#fff", borderRadius: 12, padding: "14px 18px", marginBottom: 14, textAlign: "center" }}>
+              <div style={{ fontSize: 12, color: "#cadcfc", marginBottom: 3 }}>Başakşehir İlçe Başkanı</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>{ILCE_BASKANI?.ad || "—"}</div>
             </div>
-            <Blok baslik="Sokak Bazlı" arr={tumSok} adKey="sokak_ad" tur="sokak" />
-            <Blok baslik="Site Bazlı" arr={tumSit} adKey="site_ad" tur="site" />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+              {Object.entries(MAHALLE_TESKILAT).map(([mahAdi, t]) => (
+                <div key={mahAdi} style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, color: "#0f172a", marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #eef2f7" }}>{mahAdi}</div>
+                  <div style={{ display: "grid", gap: 9 }}>
+                    {kisiSatir(t.baskan, "Mahalle Başkanı")}
+                    {kisiSatir(t.yurutme, "İlçe Yürütme Kurulu Üyesi")}
+                    {(t.yk && t.yk.length ? t.yk : [null]).map((p, i) => <div key={"y" + i}>{kisiSatir(p, "İlçe Yönetim Kurulu Üyesi")}</div>)}
+                    {(t.meclis && t.meclis.length ? t.meclis : [null]).map((p, i) => <div key={"m" + i}>{kisiSatir(p, "Belediye Meclis Üyesi")}</div>)}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         );
       })()}
 
-      {/* ---- BLOKLAR & SORUMLULAR ---- */}
-      {tab === "bloklar" && !mesgul && (
-        <div>
-          {(() => {
-            const say = { blok_sorumlu: 0, ana_kademe: 0, kadin_kollari: 0, genclik_kollari: 0 };
-            d.bloklar.forEach((b) => { if (say[b.rol] != null) say[b.rol]++; });
-            const siteSet = new Set(d.bloklar.map((b) => b.site_kayit_id).filter(Boolean));
-            const kart = (lbl, val, renk, key) => (
-              <button key={lbl} onClick={() => setBlokFiltre(key)}
-                style={{ textAlign: "left", cursor: "pointer", background: blokFiltre === key ? renk + "14" : "#fff", border: "1px solid " + (blokFiltre === key ? renk : "#eef2f7"), borderRadius: 10, padding: "10px 14px", minWidth: 120 }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>{lbl}</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: renk }}>{fmt(val)}</div>
-              </button>
-            );
-            return (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
-                {kart("Toplam Görevli", d.bloklar.length, "#0f172a", "hepsi")}
-                {kart("Blok Sorumlusu", say.blok_sorumlu, "#0369a1", "blok_sorumlu")}
-                {kart("Ana Kademe Temsilci", say.ana_kademe, "#3730a3", "ana_kademe")}
-                {kart("Kadın Temsilci", say.kadin_kollari, "#9d174d", "kadin_kollari")}
-                {kart("Gençlik Temsilci", say.genclik_kollari, "#166534", "genclik_kollari")}
-                {d.blokOzet ? (
-                  <div style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 10, padding: "10px 14px", minWidth: 150 }}>
-                    <div style={{ fontSize: 12, color: "#64748b" }}>Blok sorumlusu (blok)</div>
-                    <div style={{ fontSize: 20, fontWeight: 800 }}>
-                      <span style={{ color: "#166534" }}>{fmt(d.blokOzet.atananBlok)}</span>
-                      <span style={{ color: "#94a3b8", fontSize: 15 }}> / {fmt(d.blokOzet.toplamBlok)}</span>
-                      {d.blokOzet.bosBlok > 0 ? <span style={{ color: "#b91c1c", fontSize: 13, fontWeight: 700 }}> · {fmt(d.blokOzet.bosBlok)} boş</span> : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })()}
-          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>Karta tıklayarak kademeye göre filtreleyin{blokFiltre !== "hepsi" ? <> · <b style={{ color: "#c2410c", cursor: "pointer" }} onClick={() => setBlokFiltre("hepsi")}>filtreyi temizle</b></> : null}</div>
+      {/* ---- EKSİKLER & UYARILAR ---- */}
+      {tab === "eksik" && !mesgul && (() => {
+        const bos = dF.bosBloklar || [];
+        const bosGorevMah = (dF.mahOzet || []).filter((m) => !m.uye && !m.ziyaret);
+        const dusukZiyaret = (dF.mahOzet || []).filter((m) => oran(m.ziyaret, m.hane) < 10);
+        const siteler = dF.siteSor || [];
+        const atanmamisSite = siteler.filter((s) => !s.temsilci_id);
+        const atananSite = siteler.length - atanmamisSite.length;
+        const bosBlokSay = bos.reduce((a, x) => a + x.bloklar.length, 0);
+        // Mahalle seçiliyse o mahallenin blok toplamını filtrelenmiş listeden türet
+        const toplamBlok = mahFiltre ? bos.reduce((a, x) => a + (x.toplam || 0), 0) : (d.blokOzet?.toplamBlok || 0);
+        const atananBlok = mahFiltre ? Math.max(0, toplamBlok - bosBlokSay) : (d.blokOzet?.atananBlok || 0);
 
-          {(blokFiltre === "hepsi" || blokFiltre === "blok_sorumlu") && d.bosBloklar && d.bosBloklar.length > 0 && (
-            <div style={{ border: "1px solid #fecaca", background: "#fef2f2", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#b91c1c", marginBottom: 8 }}>
-                Blok sorumlusu ATANMAMIŞ bloklar · {fmt(d.blokOzet?.bosBlok || 0)} blok / {fmt(d.bosBloklar.length)} site
+        // Atanmamış siteleri mahalleye göre grupla (bar chart)
+        const siteMah = {};
+        atanmamisSite.forEach((s) => { const m = mahAd[s.mahalle_id] || "—"; siteMah[m] = (siteMah[m] || 0) + 1; });
+        const siteMahBar = Object.entries(siteMah).map(([ad, s]) => ({ ad: ad.length > 10 ? ad.slice(0, 9) + "…" : ad, tamAd: ad, adet: s })).sort((a, b) => b.adet - a.adet);
+        // Atanmamış blokları mahalleye göre grupla
+        const blokMah = {};
+        bos.forEach((b) => { const m = mahAd[b.mahalle_id] || "—"; blokMah[m] = (blokMah[m] || 0) + b.bloklar.length; });
+        const blokMahBar = Object.entries(blokMah).map(([ad, s]) => ({ ad: ad.length > 10 ? ad.slice(0, 9) + "…" : ad, tamAd: ad, adet: s })).sort((a, b) => b.adet - a.adet);
+
+        const donut = (baslik, atanan, bosSay, renkBos) => {
+          const veri = [{ ad: "Atanan", deger: atanan, renk: "#16a34a" }, { ad: "Eksik", deger: bosSay, renk: renkBos }].filter((x) => x.deger > 0);
+          const tam = atanan + bosSay;
+          return (
+            <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 6 }}>{baslik}</div>
+              {tam ? (
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={veri} dataKey="deger" nameKey="ad" cx="50%" cy="50%" outerRadius={80} innerRadius={48} label={(e) => `${e.ad}: ${fmt(e.deger)}`} labelLine={false} style={{ fontSize: 11 }}>
+                      {veri.map((e, i) => <Cell key={i} fill={e.renk} />)}
+                    </Pie>
+                    <Tooltip formatter={(v) => [fmt(v), ""]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : <div style={{ color: "#94a3b8", fontSize: 13, padding: 24, textAlign: "center" }}>Veri yok</div>}
+              <div style={{ textAlign: "center", fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                <b style={{ color: bosSay ? renkBos : "#16a34a", fontSize: 15 }}>%{oran(atanan, tam)}</b> tamamlandı
               </div>
-              {d.bosBloklar
-                .filter((x) => !f || (x.ad || "").toLocaleLowerCase("tr").includes(f) || (mahAd[x.mahalle_id] || "").toLocaleLowerCase("tr").includes(f))
-                .map((x, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", padding: "6px 0", borderTop: i ? "1px solid #fee2e2" : "none" }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, minWidth: 160 }}>{x.ad}</span>
-                    <span style={{ fontSize: 12, color: "#94a3b8", minWidth: 90 }}>{mahAd[x.mahalle_id] || ""}</span>
-                    <span style={{ fontSize: 12, color: "#b91c1c", fontWeight: 700 }}>{x.bloklar.length} boş</span>
-                    <span style={{ fontSize: 12, color: "#334155", flex: 1, minWidth: 200 }}>
-                      {x.bloklar.slice(0, 30).map((bk, j) => (
-                        <span key={j} style={{ display: "inline-block", background: "#fff", border: "1px solid #fecaca", color: "#b91c1c", padding: "1px 7px", borderRadius: 6, margin: "2px 4px 2px 0" }}>{bk}</span>
-                      ))}
-                      {x.bloklar.length > 30 ? <span style={{ color: "#94a3b8" }}>+{x.bloklar.length - 30}</span> : null}
-                    </span>
-                  </div>
-                ))}
             </div>
-          )}
+          );
+        };
 
-          {d.bloklar
-            .filter((b) => blokFiltre === "hepsi" || b.rol === blokFiltre)
-            .filter((b) => !f || (b.ad_soyad || "").toLocaleLowerCase("tr").includes(f) || (b.site?.ad || "").toLocaleLowerCase("tr").includes(f) || (b.blok || "").toLocaleLowerCase("tr").includes(f))
-            .map((b, i) => (
-              <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 12px", borderBottom: "1px solid #f1f5f9" }}>
-                <span style={{ fontSize: 13, fontWeight: 700, minWidth: 150 }}>{b.site?.ad || "—"}</span>
-                <span style={{ fontSize: 12, background: "#e0f2fe", color: "#0369a1", padding: "2px 8px", borderRadius: 6 }}>{b.blok || "—"} Blok</span>
-                <span style={{ fontSize: 12, background: "#f1f5f9", color: "#475569", padding: "2px 8px", borderRadius: 6 }}>{ROL_ET[b.rol] || b.rol}</span>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>{b.ad_soyad || b.eposta}</span>
-                <span style={{ marginLeft: "auto", fontSize: 12, color: "#64748b" }}>{[b.telefon, b.meslek].filter(Boolean).join(" · ")}</span>
+        const kutu = (renk, ikon, baslik, adet, ic) => (
+          <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, overflow: "hidden", marginBottom: 12 }}>
+            <div style={{ padding: "11px 15px", borderBottom: "1px solid #eef2f7", display: "flex", alignItems: "center", gap: 8, fontWeight: 800, fontSize: 14, color: renk }}>
+              {ikon}{baslik}<span style={{ marginLeft: "auto", background: renk, color: "#fff", fontSize: 12, padding: "1px 9px", borderRadius: 999 }}>{adet}</span>
+            </div>
+            <div style={{ padding: "6px 15px 12px" }}>{ic}</div>
+          </div>
+        );
+
+        return (
+          <div>
+            {/* Tamamlanma donutları */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginBottom: 14 }}>
+              {donut("Site Sorumlusu Atama", atananSite, atanmamisSite.length, "#dc2626")}
+              {donut("Blok Sorumlusu Atama", atananBlok, bosBlokSay, "#ea580c")}
+            </div>
+
+            {/* Mahalleye göre eksik dağılımı */}
+            {(siteMahBar.length > 0 || blokMahBar.length > 0) && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12, marginBottom: 14 }}>
+                {siteMahBar.length > 0 && (
+                  <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px" }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Atanmamış Site — mahalleye göre</div>
+                    <ResponsiveContainer width="100%" height={Math.max(160, siteMahBar.length * 34)}>
+                      <BarChart data={siteMahBar} layout="vertical" margin={{ top: 0, right: 12, left: 8, bottom: 0 }}>
+                        <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <YAxis type="category" dataKey="ad" tick={{ fontSize: 11, fill: "#475569" }} axisLine={false} tickLine={false} width={90} />
+                        <Tooltip formatter={(v) => [fmt(v) + " site", ""]} labelFormatter={(l, p) => p?.[0]?.payload?.tamAd || l} />
+                        <Bar dataKey="adet" fill="#dc2626" radius={[0, 4, 4, 0]} maxBarSize={20} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+                {blokMahBar.length > 0 && (
+                  <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px" }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Atanmamış Blok — mahalleye göre</div>
+                    <ResponsiveContainer width="100%" height={Math.max(160, blokMahBar.length * 34)}>
+                      <BarChart data={blokMahBar} layout="vertical" margin={{ top: 0, right: 12, left: 8, bottom: 0 }}>
+                        <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                        <YAxis type="category" dataKey="ad" tick={{ fontSize: 11, fill: "#475569" }} axisLine={false} tickLine={false} width={90} />
+                        <Tooltip formatter={(v) => [fmt(v) + " blok", ""]} labelFormatter={(l, p) => p?.[0]?.payload?.tamAd || l} />
+                        <Bar dataKey="adet" fill="#ea580c" radius={[0, 4, 4, 0]} maxBarSize={20} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Detay listeleri */}
+            {kutu("#dc2626", <UserCheck size={15} />, "Sorumlusu Atanmamış Siteler", atanmamisSite.length,
+              atanmamisSite.length ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {atanmamisSite.slice(0, 50).map((s, i) => (
+                    <div key={s.id} style={{ fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10, padding: "5px 0", borderTop: i ? "1px solid #f8fafc" : "none" }}>
+                      <span style={{ fontWeight: 600 }}>{s.ad}</span>
+                      <span style={{ color: "#94a3b8", fontSize: 12 }}>{mahAd[s.mahalle_id] || ""}</span>
+                    </div>
+                  ))}
+                  {atanmamisSite.length > 50 && <div style={{ fontSize: 12, color: "#94a3b8" }}>+{atanmamisSite.length - 50} site daha…</div>}
+                </div>
+              ) : <div style={{ fontSize: 13, color: "#16a34a" }}>Tüm sitelere temsilci atanmış ✓</div>)}
+
+            {kutu("#ea580c", <Boxes size={15} />, "Sorumlusu Atanmamış Bloklar", bosBlokSay,
+              bos.length ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {bos.slice(0, 40).map((b, i) => (
+                    <div key={i} style={{ fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10, padding: "5px 0", borderTop: i ? "1px solid #f8fafc" : "none" }}>
+                      <span style={{ fontWeight: 600 }}>{b.ad}<span style={{ color: "#94a3b8", fontWeight: 400, fontSize: 12 }}> · {mahAd[b.mahalle_id] || ""}</span></span>
+                      <span style={{ color: "#ea580c", fontWeight: 700 }}>{b.bloklar.length} blok boş</span>
+                    </div>
+                  ))}
+                  {bos.length > 40 && <div style={{ fontSize: 12, color: "#94a3b8" }}>+{bos.length - 40} site daha…</div>}
+                </div>
+              ) : <div style={{ fontSize: 13, color: "#16a34a" }}>Tüm bloklara sorumlu atanmış ✓</div>)}
+
+            {kutu("#7c3aed", <MapPin size={15} />, "Ziyaret İlerlemesi Düşük Mahalleler (%10 altı)", dusukZiyaret.length,
+              dusukZiyaret.length ? (
+                <div style={{ display: "grid", gap: 6 }}>
+                  {dusukZiyaret.map((m) => (
+                    <div key={m.mahalle_id} style={{ fontSize: 13, display: "flex", justifyContent: "space-between", padding: "5px 0" }}>
+                      <span style={{ fontWeight: 600 }}>{m.ad}</span>
+                      <span style={{ color: "#7c3aed", fontWeight: 700 }}>%{oran(m.ziyaret, m.hane)} · {fmt(m.ziyaret)}/{fmt(m.hane)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : <div style={{ fontSize: 13, color: "#16a34a" }}>Tüm mahalleler %10 üzeri ✓</div>)}
+
+            {kutu("#0891b2", <AlertTriangle size={15} />, "Hiç Aktivite Olmayan Mahalleler", bosGorevMah.length,
+              bosGorevMah.length ? (
+                <div style={{ fontSize: 13, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {bosGorevMah.map((m) => <span key={m.mahalle_id} style={{ background: "#cffafe", color: "#155e75", padding: "3px 10px", borderRadius: 999, fontWeight: 600 }}>{m.ad}</span>)}
+                </div>
+              ) : <div style={{ fontSize: 13, color: "#16a34a" }}>Her mahallede üye/ziyaret aktivitesi var ✓</div>)}
+          </div>
+        );
+      })()}
+
+      {/* ---- NOTLAR ---- */}
+      {tab === "notlar" && !mesgul && (() => {
+        const notlar = dF.notlar || [];
+        // Yaklaşım dağılımı (siyah/gri/beyaz)
+        const yakSay = { Siyah: 0, Gri: 0, Beyaz: 0, "Belirtilmemiş": 0 };
+        notlar.forEach((n) => { const y = yaklasimBilgi(n.yaklasim); yakSay[y ? y.ad : "Belirtilmemiş"]++; });
+        const yakPasta = [
+          { ad: "Siyah", deger: yakSay.Siyah, renk: "#1f2937" },
+          { ad: "Gri", deger: yakSay.Gri, renk: "#9ca3af" },
+          { ad: "Beyaz", deger: yakSay.Beyaz, renk: "#e5e7eb" },
+          { ad: "Belirtilmemiş", deger: yakSay["Belirtilmemiş"], renk: "#c7d2fe" },
+        ].filter((x) => x.deger > 0);
+        // En aktif sorumlular
+        const kisiSay = {};
+        notlar.forEach((n) => { const ad = n.kisi?.ad_soyad || n.kisi?.eposta || "Bilinmiyor"; kisiSay[ad] = (kisiSay[ad] || 0) + 1; });
+        const kisiBar = Object.entries(kisiSay).map(([ad, s]) => ({ ad: ad.length > 14 ? ad.slice(0, 13) + "…" : ad, tamAd: ad, not: s })).sort((a, b) => b.not - a.not).slice(0, 10);
+        // Günlük giriş
+        const gunSay = {};
+        notlar.forEach((n) => { if (!n.tarih) return; const g = new Date(n.tarih).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" }); gunSay[g] = (gunSay[g] || 0) + 1; });
+        const gunBar = Object.entries(gunSay).map(([g, s]) => ({ gun: g, not: s })).slice(-14);
+        // Haftalık kırılım: ISO hafta anahtarı
+        const haftaAnahtar = (tarih) => {
+          const dt = new Date(tarih); const g = new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()));
+          const gun = g.getUTCDay() || 7; g.setUTCDate(g.getUTCDate() + 4 - gun);
+          const yilBas = new Date(Date.UTC(g.getUTCFullYear(), 0, 1));
+          const hafta = Math.ceil((((g - yilBas) / 86400000) + 1) / 7);
+          return { key: `${g.getUTCFullYear()}-H${String(hafta).padStart(2, "0")}`, etiket: `${hafta}. hf` };
+        };
+        const haftaSay = {};
+        notlar.forEach((n) => { if (!n.tarih) return; const h = haftaAnahtar(n.tarih); (haftaSay[h.key] ||= { et: h.etiket, not: 0 }).not++; });
+        const haftaBar = Object.entries(haftaSay).sort((a, b) => a[0].localeCompare(b[0])).slice(-10).map(([, v]) => ({ hafta: v.et, not: v.not }));
+        // Kişi × hafta aktivite matrisi (son 6 hafta) — kim ne yapıyor
+        const sonHaftalar = [...new Set(notlar.filter((n) => n.tarih).map((n) => haftaAnahtar(n.tarih).key))].sort().slice(-6);
+        const kisiHafta = {};
+        notlar.forEach((n) => {
+          if (!n.tarih) return;
+          const ad = n.kisi?.ad_soyad || n.kisi?.eposta || "Bilinmiyor";
+          const hk = haftaAnahtar(n.tarih).key;
+          if (!sonHaftalar.includes(hk)) return;
+          (kisiHafta[ad] ||= {})[hk] = ((kisiHafta[ad] || {})[hk] || 0) + 1;
+        });
+        const haftaEtiket = {}; notlar.forEach((n) => { if (n.tarih) { const h = haftaAnahtar(n.tarih); haftaEtiket[h.key] = h.etiket; } });
+        const kisiHaftaList = Object.entries(kisiHafta).map(([ad, hf]) => ({ ad, hf, toplam: Object.values(hf).reduce((a, b) => a + b, 0) })).sort((a, b) => b.toplam - a.toplam);
+        return (
+          <div>
+            {/* Özet kartları */}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+              {[["Toplam Not", notlar.length, "#2563eb"], ["Beyaz (olumlu)", yakSay.Beyaz, "#16a34a"], ["Gri (kararsız)", yakSay.Gri, "#6b7280"], ["Siyah (olumsuz)", yakSay.Siyah, "#1f2937"]].map(([et, sy, rk], i) => (
+                <div key={i} style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "13px 16px", flex: "1 1 150px" }}>
+                  <div style={{ fontSize: 12, color: "#64748b", marginBottom: 5 }}>{et}</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: rk }}>{fmt(sy)}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12, marginBottom: 14 }}>
+              {/* Yaklaşım donut */}
+              <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px" }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Yaklaşım Dağılımı</div>
+                {yakPasta.length ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <PieChart>
+                      <Pie data={yakPasta} dataKey="deger" nameKey="ad" cx="50%" cy="50%" outerRadius={90} innerRadius={45} label={(e) => `${e.ad}: ${e.deger}`} labelLine={false} style={{ fontSize: 11 }}>
+                        {yakPasta.map((e, i) => <Cell key={i} fill={e.renk} stroke="#cbd5e1" />)}
+                      </Pie>
+                      <Tooltip formatter={(v) => [fmt(v) + " not", ""]} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : <div style={{ color: "#94a3b8", fontSize: 13, padding: 20, textAlign: "center" }}>Veri yok</div>}
+              </div>
+              {/* En aktif sorumlular */}
+              <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px" }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>En Aktif Sorumlular (not girişi)</div>
+                {kisiBar.length ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={kisiBar} layout="vertical" margin={{ top: 0, right: 12, left: 8, bottom: 0 }}>
+                      <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <YAxis type="category" dataKey="ad" tick={{ fontSize: 11, fill: "#475569" }} axisLine={false} tickLine={false} width={95} />
+                      <Tooltip formatter={(v) => [fmt(v) + " not", ""]} labelFormatter={(l, p) => p?.[0]?.payload?.tamAd || l} />
+                      <Bar dataKey="not" fill="#2563eb" radius={[0, 4, 4, 0]} maxBarSize={20} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <div style={{ color: "#94a3b8", fontSize: 13, padding: 20, textAlign: "center" }}>Veri yok</div>}
+              </div>
+            </div>
+            {/* Günlük giriş trendi */}
+            {gunBar.length > 1 && (
+              <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Günlük Not Girişi (son 14 gün)</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={gunBar} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                    <XAxis dataKey="gun" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip formatter={(v) => [fmt(v) + " not", ""]} />
+                    <Bar dataKey="not" fill="#7c3aed" radius={[4, 4, 0, 0]} maxBarSize={26} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Haftalık not girişi */}
+            {haftaBar.length > 1 && (
+              <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Haftalık Not Girişi</div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={haftaBar} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                    <XAxis dataKey="hafta" tick={{ fontSize: 11, fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                    <Tooltip formatter={(v) => [fmt(v) + " not", ""]} />
+                    <Bar dataKey="not" fill="#0891b2" radius={[4, 4, 0, 0]} maxBarSize={30} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {/* Kim ne yapıyor — kişi × hafta aktivite matrisi */}
+            {kisiHaftaList.length > 0 && (
+              <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
+                <div style={{ padding: "11px 15px", borderBottom: "1px solid #eef2f7", fontWeight: 800, fontSize: 14 }}>Kim Ne Yapıyor — haftalık aktivite (son 6 hafta)</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 500 }}>
+                    <thead>
+                      <tr style={{ background: "#f8fafc", color: "#475569" }}>
+                        <th style={{ textAlign: "left", padding: "9px 15px" }}>Sorumlu</th>
+                        {sonHaftalar.map((hk) => <th key={hk} style={{ padding: "9px 8px", textAlign: "center", fontSize: 12 }}>{haftaEtiket[hk] || hk}</th>)}
+                        <th style={{ padding: "9px 15px", textAlign: "right" }}>Toplam</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kisiHaftaList.map((k) => (
+                        <tr key={k.ad} style={{ borderTop: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "8px 15px", fontWeight: 700, whiteSpace: "nowrap" }}>{k.ad}</td>
+                          {sonHaftalar.map((hk) => {
+                            const v = k.hf[hk] || 0;
+                            return (
+                              <td key={hk} style={{ padding: "6px 8px", textAlign: "center" }}>
+                                {v ? (
+                                  <span style={{ display: "inline-block", minWidth: 26, padding: "3px 8px", borderRadius: 7, fontWeight: 700, fontSize: 12,
+                                    background: v >= 10 ? "#16a34a" : v >= 3 ? "#86efac" : "#dcfce7",
+                                    color: v >= 10 ? "#fff" : "#166534" }}>{v}</span>
+                                ) : <span style={{ color: "#e2e8f0" }}>·</span>}
+                              </td>
+                            );
+                          })}
+                          <td style={{ padding: "8px 15px", textAlign: "right", fontWeight: 800, color: "#0f172a" }}>{k.toplam}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ padding: "8px 15px", fontSize: 11.5, color: "#94a3b8", borderTop: "1px solid #f1f5f9" }}>
+                  Renk koyulaştıkça o hafta daha çok not/ziyaret girilmiş. Boş (·) = o hafta hiç aktivite yok.
+                </div>
+              </div>
+            )}
+
+            {/* Not listesi */}
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#475569", margin: "4px 0 8px" }}>Not Detayları ({notlar.length})</div>
+            {notlar.filter((n) => !f || (n.not_ || "").toLocaleLowerCase("tr").includes(f) || haneEtiket(n.hane).toLocaleLowerCase("tr").includes(f)).map((n, i) => (
+              <div key={i} style={{ border: "1px solid #eef2f7", borderRadius: 10, padding: "10px 13px", marginBottom: 8, background: "#fff" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+                  <b style={{ fontSize: 13.5 }}>{haneEtiket(n.hane)}</b>
+                  {n.siteAd ? <span style={{ fontSize: 12, background: "#f5f3ff", color: "#6d28d9", padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{n.siteAd}</span> : null}
+                  {n.yaklasim ? (() => { const y = yaklasimBilgi(n.yaklasim); return <span style={{ fontSize: 12, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: 3, background: y.bg, border: `1px solid ${y.kenar}`, display: "inline-block" }} />{y.ad}</span>; })() : null}
+                  {n.kapsam ? <span style={{ fontSize: 12, background: "#eef2ff", color: "#3730a3", padding: "1px 8px", borderRadius: 6 }}>{n.kapsam}</span> : null}
+                  {n.kisi ? (() => { const rk = rolRenk(n.kisi.rol); return <span style={{ fontSize: 12, background: rk.bg, color: rk.fg, padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{n.kisi.ad_soyad || n.kisi.eposta} · {rolEtiket(n.kisi.rol, !!n.hane?.site_kayit_id)}</span>; })() : null}
+                  <span style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>{n.tarih ? new Date(n.tarih).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : ""}</span>
+                </div>
+                <div style={{ fontSize: 13.5, color: "#334155" }}>{n.not_}</div>
               </div>
             ))}
-          {d.bloklar.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: 12 }}>Henüz blok sorumlusu atanmamış.</div>}
-        </div>
-      )}
-
-      {/* ---- SİTE SORUMLULARI ---- */}
-      {tab === "siteSor" && !mesgul && (
-        <div>
-          {(() => {
-            const atanan = d.siteSor.filter((s) => s.temsilci_id).length;
-            const toplam = d.siteSor.length;
-            const atanmayan = toplam - atanan;
-            const kart = (lbl, val, renk, aktifKey) => (
-              <button key={lbl} onClick={() => setSiteFiltre(aktifKey)}
-                style={{ textAlign: "left", cursor: "pointer", background: siteFiltre === aktifKey ? renk + "14" : "#fff", border: "1px solid " + (siteFiltre === aktifKey ? renk : "#eef2f7"), borderRadius: 10, padding: "10px 14px", minWidth: 130 }}>
-                <div style={{ fontSize: 12, color: "#64748b" }}>{lbl}</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: renk }}>{fmt(val)}</div>
-              </button>
-            );
-            return (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
-                {kart("Tüm site", toplam, "#0f172a", "hepsi")}
-                {kart("Temsilci atandı", atanan, "#166534", "atanan")}
-                {kart("Temsilci yok", atanmayan, "#b91c1c", "atanmayan")}
-                <div style={{ background: "#fff", border: "1px solid #eef2f7", borderRadius: 10, padding: "10px 14px", minWidth: 130 }}>
-                  <div style={{ fontSize: 12, color: "#64748b" }}>Atanma oranı</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: "#c2410c" }}>%{oran(atanan, toplam)}</div>
-                </div>
-              </div>
-            );
-          })()}
-          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10 }}>Karta tıklayarak filtreleyebilirsiniz{siteFiltre !== "hepsi" ? " · " : ""}{siteFiltre !== "hepsi" ? <b style={{ color: "#c2410c", cursor: "pointer" }} onClick={() => setSiteFiltre("hepsi")}>filtreyi temizle</b> : null}</div>
-          {d.siteSor
-            .filter((s) => siteFiltre === "hepsi" || (siteFiltre === "atanan" ? s.temsilci_id : !s.temsilci_id))
-            .filter((s) => !f || (s.ad || "").toLocaleLowerCase("tr").includes(f) || (s.temsilci?.ad_soyad || "").toLocaleLowerCase("tr").includes(f) || (mahAd[s.mahalle_id] || "").toLocaleLowerCase("tr").includes(f))
-            .sort((a, b) => (b.temsilci_id ? 1 : 0) - (a.temsilci_id ? 1 : 0))
-            .map((s, i) => {
-              const pct = s.ilerleme ? oran(s.ilerleme.edilen || 0, s.ilerleme.toplam || 0) : null;
-              return (
-                <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 12px", borderBottom: "1px solid #f1f5f9" }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, minWidth: 150 }}>{s.ad}</span>
-                  <span style={{ fontSize: 12, color: "#94a3b8" }}>{mahAd[s.mahalle_id] || ""}</span>
-                  {s.temsilci_id
-                    ? <span style={{ fontSize: 12, background: "#dcfce7", color: "#166534", padding: "2px 8px", borderRadius: 6 }}>{s.temsilci?.ad_soyad || "Temsilci"}{s.temsilci?.telefon ? " · " + s.temsilci.telefon : ""}</span>
-                    : <span style={{ fontSize: 12, background: "#fef2f2", color: "#b91c1c", padding: "2px 8px", borderRadius: 6 }}>Temsilci yok</span>}
-                  {pct != null && <span style={{ marginLeft: "auto", fontSize: 12, color: "#475569" }}>{fmt(s.ilerleme.edilen || 0)} / {fmt(s.ilerleme.toplam || 0)} ziyaret · %{pct}</span>}
-                </div>
-              );
-            })}
-          {d.siteSor.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: 12 }}>Site bulunamadı.</div>}
-        </div>
-      )}
+            {notlar.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13, padding: 12 }}>Henüz not girilmemiş.</div>}
+          </div>
+        );
+      })()}
     </div>
   );
 }

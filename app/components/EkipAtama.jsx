@@ -76,9 +76,22 @@ export default function EkipAtama({ site }) {
 export async function sokakGrupBol(bolgeId, hedef) {
   const H = Math.max(1, hedef || 150);
   const TOL = Math.round(H * 0.15); // bina kuyruğu bu kadarı geçmiyorsa bütün bırak (~160 tek kalır)
-  const [{ data: ks }, { data: hrows }] = await Promise.all([
-    supabase.from("kisi").select("hane_id,uye").eq("bolge_id", bolgeId),
-    supabase.from("hane").select("id,kapi_no,kapi_blok,no,adres").eq("bolge_id", bolgeId).is("site_kayit_id", null),
+  // Supabase varsayılan 1000 satır sınırını aşmak için sayfalı oku (büyük sokaklar eksik gelmesin)
+  async function tumSayfalar(tablo, kolonlar, ekle) {
+    const hepsi = []; const ADIM = 1000;
+    for (let bas = 0; ; bas += ADIM) {
+      let q = supabase.from(tablo).select(kolonlar).eq("bolge_id", bolgeId);
+      if (ekle) q = ekle(q);
+      const { data, error } = await q.range(bas, bas + ADIM - 1);
+      if (error) throw new Error(`${tablo} okunamadı: ${error.message}`);
+      hepsi.push(...(data || []));
+      if (!data || data.length < ADIM) break;
+    }
+    return hepsi;
+  }
+  const [ks, hrows] = await Promise.all([
+    tumSayfalar("kisi", "hane_id,uye"),
+    tumSayfalar("hane", "id,kapi_no,kapi_blok,no,adres", (q) => q.is("site_kayit_id", null)),
   ]);
   const kisiMap = {}, uyeMap = {};
   (ks || []).forEach((k) => { if (!k.hane_id) return; kisiMap[k.hane_id] = (kisiMap[k.hane_id] || 0) + 1; if (k.uye) uyeMap[k.hane_id] = (uyeMap[k.hane_id] || 0) + 1; });
@@ -91,36 +104,48 @@ export async function sokakGrupBol(bolgeId, hedef) {
     ((parseInt(a.kapi) || 0) - (parseInt(b.kapi) || 0)) ||
     String(a.blok || "").localeCompare(String(b.blok || ""), "tr", { numeric: true }) ||
     ((parseInt(a.no) || 0) - (parseInt(b.no) || 0)));
-  // bina toplamları (kuyruk hesabı için)
-  const binaTop = {}; H2.forEach((h) => binaTop[h.bkey] = (binaTop[h.bkey] || 0) + h.kisi);
+  // bina toplamları (kuyruk hesabı için) — HANE sayısıyla
+  const binaTop = {}; H2.forEach((h) => binaTop[h.bkey] = (binaTop[h.bkey] || 0) + 1);
   const binaTuk = {};
+  // SOKAK BÜTÜNLÜĞÜ: sokağın tamamı hedefe yakınsa (ör. hedef 150, sokak 160 hane) tek grup bırak
+  const SOKAK_TOL = Math.round(H * 0.25); // 150 için +37 → 187 haneye kadar tek grup
+  const toplamHane = H2.length;
   // doldur: ev bazında, bina sınırını tercih et; bina tek başına büyükse ortadan böl
   const chunks = []; let cur = null;
   const yeni = () => ({ ids: [], kisi: 0, uye: 0, kb: null, ks2: null, db: null, ds: null });
+  if (toplamHane > 0 && toplamHane <= H + SOKAK_TOL) {
+    // tek grup: sokağın tamamı
+    const tek = yeni();
+    H2.forEach((h) => { if (tek.kb == null) { tek.kb = h.kapi; tek.db = h.no; } tek.ks2 = h.kapi; tek.ds = h.no; tek.ids.push(h.id); tek.kisi += h.kisi; tek.uye += h.uye; });
+    chunks.push(tek);
+  } else {
   for (let i = 0; i < H2.length; i++) {
     const h = H2[i];
     if (!cur) cur = yeni();
     if (cur.kb == null) { cur.kb = h.kapi; cur.db = h.no; }
     cur.ks2 = h.kapi; cur.ds = h.no;
     cur.ids.push(h.id); cur.kisi += h.kisi; cur.uye += h.uye;
-    binaTuk[h.bkey] = (binaTuk[h.bkey] || 0) + h.kisi;
+    binaTuk[h.bkey] = (binaTuk[h.bkey] || 0) + 1;
     const next = H2[i + 1];
     const ayniBinaSonraki = next && next.bkey === h.bkey;
-    if (cur.kisi >= H) {
+    const kalanToplam = H2.length - (i + 1); // bu gruptan sonra kaç hane kalıyor
+    if (cur.ids.length >= H) {                                    // HANE sayısına göre kapat
       let kapat = false;
       if (!ayniBinaSonraki) kapat = true;                          // bina sınırı → kapat
       else {
-        const kuyruk = (binaTop[h.bkey] || 0) - (binaTuk[h.bkey] || 0); // bu binadan kalan
+        const kuyruk = (binaTop[h.bkey] || 0) - (binaTuk[h.bkey] || 0); // bu binadan kalan hane
         if (kuyruk > TOL) kapat = true;                            // kalan çoksa orta yerde kapat
       }
+      if (kalanToplam > 0 && kalanToplam <= TOL) kapat = false;     // az kaldıysa bu gruba kat (160 tek kalsın)
       if (kapat) { chunks.push(cur); cur = null; }
     }
   }
   if (cur && cur.ids.length) chunks.push(cur);
+  }
   // küçük son grubu önceki gruba kat — yarım hedeften azsa boşuna ayrı grup olmasın
   if (chunks.length >= 2) {
     const son = chunks[chunks.length - 1];
-    if (son.kisi < H * 0.5) {
+    if (son.ids.length < H * 0.5) {
       const onceki = chunks[chunks.length - 2];
       onceki.ids.push(...son.ids); onceki.kisi += son.kisi; onceki.uye += son.uye;
       onceki.ks2 = son.ks2; onceki.ds = son.ds;

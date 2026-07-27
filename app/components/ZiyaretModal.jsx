@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
 import { MapPin } from "lucide-react";
 import { haneBaslik, yakRenk } from "../../lib/format";
+import { YAKLASIM_LISTE, yaklasimBilgi } from "../../lib/constants";
 import { KAPSAMLAR } from "../../lib/constants";
 import Haneler from "./Haneler";
 
@@ -70,7 +71,7 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
                 return (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderTop: "1px solid #f1f5f9", fontSize: 12.5, flexWrap: "wrap" }}>
                   <b style={{ minWidth: 112 }}>{g.tarih ? new Date(g.tarih).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}</b>
-                  {g.yaklasim ? <span style={{ color: yakRenk(g.yaklasim), fontWeight: 700 }}>Yaklaşım {g.yaklasim}/5</span> : null}
+                  {g.yaklasim ? (() => { const y = yaklasimBilgi(g.yaklasim); return <span style={{ fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}><span style={{ width: 11, height: 11, borderRadius: 3, background: y.bg, border: `1px solid ${y.kenar}`, display: "inline-block" }} />{y.ad}</span>; })() : null}
                   {g.kapsam ? <span style={{ background: "#eef2ff", color: "#3730a3", padding: "1px 8px", borderRadius: 6 }}>{g.kapsam}</span> : null}
                   {p ? <span style={{ background: rk.bg, color: rk.fg, padding: "1px 8px", borderRadius: 6, fontWeight: 600 }}>{p.ad_soyad || p.eposta} · {rolEtiket(p.rol)}</span> : null}
                   {g.not_ ? <span style={{ color: "#64748b", width: "100%", marginLeft: 112 }}>— {g.not_}</span> : null}
@@ -82,12 +83,29 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
         )}
 
         <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginTop: 14 }}>KARŞI TARAFIN YAKLAŞIMI</label>
-        <div style={{ display: "flex", gap: 6, margin: "7px 0 4px" }}>
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button key={n} onClick={() => setYaklasim(n)} style={{ flex: 1, padding: "9px 0", borderRadius: 9, border: "1px solid " + (yaklasim === n ? yakRenk(n) : "#d1d5db"), background: yaklasim === n ? yakRenk(n) : "#fff", color: yaklasim === n ? "#fff" : "#374151", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>{n}</button>
-          ))}
+        <div style={{ display: "flex", gap: 8, margin: "7px 0 6px" }}>
+          {YAKLASIM_LISTE.map((y) => {
+            const secili = yaklasimBilgi(yaklasim)?.deger === y.deger;
+            return (
+              <button key={y.deger} onClick={() => setYaklasim(y.deger)} title={y.aciklama}
+                style={{
+                  flex: 1, padding: "12px 0 10px", borderRadius: 11, cursor: "pointer",
+                  border: secili ? `3px solid #2563eb` : `1px solid ${y.kenar}`,
+                  background: y.bg, color: y.fg, fontWeight: 800, fontSize: 14,
+                  boxShadow: secili ? "0 0 0 3px #bfdbfe" : "none",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 3,
+                }}>
+                <span style={{ fontSize: 15 }}>{y.ad}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, opacity: 0.85 }}>{y.aciklama}</span>
+              </button>
+            );
+          })}
         </div>
-        <div style={{ fontSize: 12, color: yaklasim ? yakRenk(yaklasim) : "#94a3b8", fontWeight: 600, marginBottom: 14, minHeight: 16 }}>{yaklasim ? yakEtiket[yaklasim] : "1 = çok olumsuz · 5 = çok olumlu"}</div>
+        <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 600, marginBottom: 14, minHeight: 16 }}>
+          {yaklasim
+            ? <span style={{ color: "#334155" }}>Seçilen: <b>{yaklasimBilgi(yaklasim)?.ad}</b> — {yaklasimBilgi(yaklasim)?.aciklama}</span>
+            : "Siyah = karşı · Gri = kararsız · Beyaz = olumlu"}
+        </div>
 
         <label style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>KAPSAM <span style={{ fontWeight: 400, color: "#94a3b8" }}>(seç ya da kendin yaz)</span></label>
         <input list="kapsam-list" value={kapsam} onChange={(e) => setKapsam(e.target.value)} placeholder="Örn: Bayram ziyareti, esnaf ziyareti…" style={{ width: "100%", margin: "7px 0 14px", padding: "9px 10px", border: "1px solid #d1d5db", borderRadius: 9, fontSize: 14 }} />

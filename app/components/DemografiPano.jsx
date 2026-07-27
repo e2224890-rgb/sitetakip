@@ -1,11 +1,12 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../lib/supabase";
-import { Users, Home, ShieldCheck } from "lucide-react";
+import { Users, Home, ShieldCheck, UsersRound } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { fmt, oran, NUF_RENK } from "../../lib/format";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import StatCard from "./StatCard";
+import { MAHALLE_NUFUS, ILCE_BASKANI, MAHALLE_TESKILAT, ILCE_BIRIM } from "../../lib/constants";
 
 /*
   Paylaşımlı demografi panosu — her drill-down seviyesinde AYNI grafik seti, yalnız kapsam değişir.
@@ -25,6 +26,13 @@ import StatCard from "./StatCard";
 export default function DemografiPano({ stat, ekstra, mahalleIds, baslik = "", children }) {
   const { kisi = 0, hane = 0, uye = 0, erkek = 0, kadin = 0, yasArr = [] } = stat || {};
   const uyeOran = oran(uye, kisi);
+  // Ortalama yaş: yaş aralıklarının orta noktalarından ağırlıklı ortalama (yaklaşık)
+  const ortYas = useMemo(() => {
+    const ORTA = { "18-24": 21, "25-34": 29.5, "35-44": 39.5, "45-54": 49.5, "55-64": 59.5, "65+": 70 };
+    let t = 0, n = 0;
+    (yasArr || []).forEach((y) => { const m = ORTA[y.ad]; if (m && y.deger) { t += m * y.deger; n += y.deger; } });
+    return n ? Math.round(t / n) : 0;
+  }, [yasArr]);
   const cinsTop = erkek + kadin;
   const yasTop = (yasArr || []).reduce((a, x) => a + (x.deger || 0), 0);
   const pasta = [
@@ -36,6 +44,45 @@ export default function DemografiPano({ stat, ekstra, mahalleIds, baslik = "", c
   useEffect(() => { setHazir(true); }, []);
 
   const idKey = (mahalleIds || []).filter(Boolean).join(",");
+  // Cinsiyete göre ortalama yaş — tek sorgu + önbellek (anında)
+  const [cinsYas, setCinsYas] = useState(null);
+  useEffect(() => {
+    const ids = (mahalleIds || []).filter(Boolean);
+    if (!ids.length) { setCinsYas(null); return; }
+    const anahtar = `yascins:mah:${idKey}`;
+    const snap = cacheOku(anahtar);
+    if (snap) setCinsYas(snap); // ANINDA
+    let iptal = false;
+    (async () => {
+      const yil = new Date().getFullYear();
+      let sonuc = null;
+      const { data, error } = await supabase.from("mv_mahalle_yas_cins").select("c, kisi, ort_dogum").in("mahalle_id", ids);
+      if (!error && data && data.length) {
+        const agg = {};
+        data.forEach((r) => {
+          const c = String(r.c || "").toLocaleUpperCase("tr").charAt(0);
+          if (!agg[c]) agg[c] = { n: 0, t: 0 };
+          agg[c].n += r.kisi || 0; agg[c].t += (r.kisi || 0) * Number(r.ort_dogum || 0);
+        });
+        const hes = (c) => (agg[c] && agg[c].n ? Math.round(yil - agg[c].t / agg[c].n) : 0);
+        sonuc = { e: hes("E"), k: hes("K") };
+      } else {
+        const KOVA = [[21, yil - 24, yil - 18], [29.5, yil - 34, yil - 25], [39.5, yil - 44, yil - 35], [49.5, yil - 54, yil - 45], [59.5, yil - 64, yil - 55], [70, 1900, yil - 65]];
+        const sor = async (harf) => {
+          const s = await Promise.all(KOVA.map(([, lo, hi]) =>
+            supabase.from("kisi").select("*", { count: "exact", head: true })
+              .in("mahalle_id", ids).ilike("cinsiyet", harf + "%").gte("dogum_yili", lo).lte("dogum_yili", hi)));
+          let t = 0, n = 0;
+          s.forEach((r, i) => { const c = r?.count || 0; t += KOVA[i][0] * c; n += c; });
+          return n ? Math.round(t / n) : 0;
+        };
+        const [e, k] = await Promise.all([sor("e"), sor("k")]);
+        sonuc = { e, k };
+      }
+      if (!iptal && sonuc && (sonuc.e || sonuc.k)) { setCinsYas(sonuc); cacheYaz(anahtar, sonuc); }
+    })();
+    return () => { iptal = true; };
+  }, [idKey]);
   const [nufIl, setNufIl] = useState(null);
   const [nufHata, setNufHata] = useState(null);
   const [digerAcik, setDigerAcik] = useState(false);
@@ -95,7 +142,7 @@ export default function DemografiPano({ stat, ekstra, mahalleIds, baslik = "", c
 
   const yasPanel = (
     <div className="panel pad">
-      <div className="panel-h2"><h3>{b("Yaş Aralığı Grafiği")}</h3><span className="dim">{fmt(yasTop)} kişi</span></div>
+      <div className="panel-h2"><h3>{b("Yaş Aralığı Grafiği")}</h3><span className="dim">{fmt(yasTop)} kişi{ortYas ? ` · ort. ${ortYas} yaş` : ""}</span></div>
       {hazir ? (
         <ResponsiveContainer width="100%" height={210}>
           <BarChart data={yasArr} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
@@ -120,7 +167,16 @@ export default function DemografiPano({ stat, ekstra, mahalleIds, baslik = "", c
           <div className="bar"><i style={{ width: `${oran(erkek, cinsTop)}%`, background: "#2563eb" }} /></div>
           <div className="cins-satir" style={{ marginTop: 14 }}><span className="cins-ad"><span className="dot" style={{ background: "#db2777" }} /> Kadın</span><b className="mono">{fmt(kadin)}</b></div>
           <div className="bar"><i style={{ width: `${oran(kadin, cinsTop)}%`, background: "#db2777" }} /></div>
-          <div className="cins-ozet">Erkek %{oran(erkek, cinsTop)} · Kadın %{oran(kadin, cinsTop)}</div>
+          <div className="cins-ozet" style={{ display: "flex", justifyContent: "center", gap: 18, flexWrap: "wrap", fontSize: 13.5, marginTop: 10, paddingTop: 10, borderTop: "1px solid #eef2f7" }}>
+            <span style={{ color: "#1d4ed8", fontWeight: 700 }}>
+              Erkek %{oran(erkek, cinsTop)}
+              {cinsYas?.e ? <span style={{ color: "#475569", fontWeight: 600 }}> · ort. <b style={{ color: "#1d4ed8" }}>{cinsYas.e}</b> yaş</span> : null}
+            </span>
+            <span style={{ color: "#be185d", fontWeight: 700 }}>
+              Kadın %{oran(kadin, cinsTop)}
+              {cinsYas?.k ? <span style={{ color: "#475569", fontWeight: 600 }}> · ort. <b style={{ color: "#be185d" }}>{cinsYas.k}</b> yaş</span> : null}
+            </span>
+          </div>
         </div>
       )}
     </div>
@@ -193,7 +249,58 @@ export default function DemografiPano({ stat, ekstra, mahalleIds, baslik = "", c
 
   return (
     <>
-      <div className="grid-stats">
+      {(() => {
+        // Mahalle teşkilatı — telefonlu, kadın pembe/erkek mavi
+        const mahAd = String(baslik || "").replace(/\s*Mahallesi\s*$/i, "").trim();
+        const t = MAHALLE_TESKILAT[mahAd];
+        if (!t) return null;
+        const bas = (ad) => String(ad || "").trim().split(/\s+/).map((p) => p[0] || "").join("").slice(0, 2).toLocaleUpperCase("tr");
+        const satir = (kisi, gorev, vurgu) => {
+          if (!kisi) return null;
+          const kadin = !!kisi.k;
+          const renk = kadin ? { bg: "#fce7f3", fg: "#9d174d" } : { bg: "#e0edff", fg: "#1e40af" };
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, background: vurgu ? (kadin ? "#fdf2f8" : "#fff4ec") : "#f6f8fb", border: vurgu ? `1px solid ${kadin ? "#f9a8d4" : "#f0b083"}` : "1px solid transparent", borderRadius: 9, padding: vurgu ? "10px 12px" : "8px 12px" }}>
+              <div style={{ width: vurgu ? 34 : 30, height: vurgu ? 34 : 30, borderRadius: "50%", flex: "0 0 auto", background: renk.bg, color: renk.fg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11.5, fontWeight: 800 }}>{bas(kisi.ad)}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: vurgu ? 14 : 13, fontWeight: 700, color: "#0f172a", wordBreak: "break-word", overflowWrap: "anywhere" }}>{kisi.ad}</div>
+                <div style={{ fontSize: 11, color: "#64748b" }}>{gorev}</div>
+                {(() => {
+                  const b = ILCE_BIRIM[String(kisi.ad || "").trim().toLocaleUpperCase("tr")];
+                  return b ? <div style={{ fontSize: 10.5, color: "#c2410c", fontWeight: 600, marginTop: 1 }}>{b}</div> : null;
+                })()}
+                {kisi.tel ? <a href={`tel:${kisi.tel.replace(/[^0-9+]/g, "")}`} onClick={(e) => e.stopPropagation()} style={{ fontSize: 11.5, color: "#2563eb", textDecoration: "none", fontWeight: 600 }}>{kisi.tel}</a> : null}
+              </div>
+            </div>
+          );
+        };
+        const ilceList = [
+          [t.yurutme, "İlçe Yürütme Kurulu Üyesi"],
+          ...((t.yk && t.yk.length ? t.yk : []).map((p) => [p, "İlçe Yönetim Kurulu Üyesi"])),
+          ...((t.meclis && t.meclis.length ? t.meclis : []).map((p) => [p, "Belediye Meclis Üyesi"])),
+        ].filter(([k]) => k);
+        return (
+          <div className="panel" style={{ padding: "13px 15px 15px", marginBottom: 12 }}>
+            {satir(t.baskan, "Mahalle Başkanı", true)}
+            <div style={{ fontSize: 10.5, fontWeight: 800, color: "#94a3b8", letterSpacing: 0.5, margin: "12px 0 7px" }}>İLÇE YÖNETİMİ</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 8 }}>
+              {ilceList.map(([kisi, gorev], i) => <div key={i}>{satir(kisi, gorev)}</div>)}
+            </div>
+            {t.bby ? (<>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: "#94a3b8", letterSpacing: 0.5, margin: "12px 0 7px" }}>BELEDİYE</div>
+              {satir(t.bby, "Belediye Başkan Yardımcısı")}
+            </>) : null}
+          </div>
+        );
+      })()}
+      <div className="grid-stats" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+        {(() => {
+          // Mahalle nüfusu (TÜİK). baslik "Kayaşehir Mahallesi" -> "Kayaşehir"
+          const ad = String(baslik || "").replace(/\s*Mahallesi\s*$/i, "").trim();
+          const nuf = MAHALLE_NUFUS[ad];
+          if (!nuf) return null;
+          return <StatCard ic={<UsersRound size={15} />} lbl={`${ad} Mahallesi Toplam Nüfus`} num={fmt(nuf)} renk="#7c3aed" />;
+        })()}
         <StatCard ic={<Users size={15} />} lbl="Toplam Seçmen" num={fmt(kisi)} meta="seçmen kaydı" />
         <StatCard ic={<Home size={15} />} lbl="Hane" num={fmt(hane)} meta="kayıtlı hane" renk="#2563eb" />
         <StatCard ic={<ShieldCheck size={15} />} lbl="AK Parti Üye" num={fmt(uye)} meta={`%${uyeOran} üyelik`} renk="#16a34a" />

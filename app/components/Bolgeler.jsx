@@ -14,6 +14,7 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
   const [adMap, setAdMap] = useState({});
   const [grupMap, setGrupMap] = useState({});
   const [sokakSay, setSokakSay] = useState(0);
+  const [siteHane, setSiteHane] = useState({}); // bolge_id -> siteye bağlı hane sayısı
   const [nufMah, setNufMah] = useState(null);
   const [digerMahAcik, setDigerMahAcik] = useState(false);
   const [topluMesgul, setTopluMesgul] = useState(null);
@@ -28,25 +29,41 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
     setGrupMap(gMap);
   }
   async function topluBol() {
-    const bolunmemis = (liste || []).filter((b) => !(grupMap[b.id] && grupMap[b.id].length));
+    // Serbest (siteye bağlı olmayan) hanesi kalmayan bölgeler "bölünmemiş" sayılmaz — bölünecek şey yok
+    const serbestVar = (b) => Math.max(0, (b.hane || 0) - (siteHane[b.id] || 0)) > 0;
+    const bolunmemis = (liste || []).filter((b) => !(grupMap[b.id] && grupMap[b.id].length) && serbestVar(b));
+    const siteliAtlanan = (liste || []).filter((b) => !(grupMap[b.id] && grupMap[b.id].length) && !serbestVar(b));
     let hedefler;
     if (bolunmemis.length) {
       hedefler = bolunmemis;
-      if (!confirm(`${hedefler.length} bölünmemiş sokak, kapı no sırasına göre ~150 kişilik gruplara bölünecek. Devam edilsin mi?`)) return;
+      if (!confirm(`${hedefler.length} bölünmemiş sokak, kapı no sırasına göre ~150 hanelik gruplara bölünecek. Devam edilsin mi?\n\nNot: Siteye bağlı haneler (site temsilcisi yönetir) bölmeye dahil edilmez.`)) return;
     } else {
-      hedefler = liste || [];
-      if (!confirm(`Tüm sokaklar zaten bölünmüş. Hepsi (${hedefler.length}) YENİDEN bölünsün mü?\n\nDetay boş kalıyorsa (hane.grup_id yazılmadıysa) bunu kullanın — grup_id'ler yeniden yazılır. Atanmış sokak sorumluları sıfırlanır.`)) return;
+      // Bölünmemiş kalmadı → hepsini YENİDEN bölme seçeneği sun (150 HANE hedefiyle)
+      hedefler = (liste || []).filter(serbestVar); // tamamı site olanları boşuna deneme
+      const not = siteliAtlanan.length
+        ? `\n\nNot: ${siteliAtlanan.length} sokak (${siteliAtlanan.map((b) => b.kod).join(", ")}) tamamı site kapsamında olduğu için bölmeye dahil edilmez.`
+        : "";
+      if (!hedefler.length) { alert("Bölünecek sokak yok — tüm sokaklar site kapsamında." + not); return; }
+      if (!confirm(`Tüm sokaklar zaten bölünmüş. ${hedefler.length} sokak ~150 HANE hedefiyle YENİDEN bölünsün mü?\n\nAtanmış sokak sorumluları sıfırlanır.${not}`)) return;
     }
     setTopluMesgul({ done: 0, total: hedefler.length });
-    let hata = null;
+    let hata = null; const bosKalan = [];
     for (let i = 0; i < hedefler.length; i++) {
-      try { await sokakGrupBol(hedefler[i].id, 150); }
+      try {
+        const grupSayisi = await sokakGrupBol(hedefler[i].id, 150);
+        if (!grupSayisi) bosKalan.push(hedefler[i].kod); // bölünecek serbest hane yok
+      }
       catch (e) { hata = `${hedefler[i].kod}: ${e?.message || e}`; break; }
       setTopluMesgul({ done: i + 1, total: hedefler.length });
     }
     await grupYenile((liste || []).map((b) => b.id));
     setTopluMesgul(null);
     if (hata) alert("Bölme durdu — " + hata);
+    else if (bosKalan.length) alert(
+      `${bosKalan.length} sokak bölünemedi: ${bosKalan.join(", ")}\n\n` +
+      `Sebep: Bu sokaklardaki hanelerin tamamı bir SİTEYE bağlı. Siteye bağlı haneler sokak grubuna alınmaz; ` +
+      `onlar "Siteler" sekmesinden site temsilcisi ve blok sorumlularıyla yönetilir.`
+    );
   }
   useEffect(() => {
     (async () => {
@@ -61,6 +78,18 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
         .filter((b) => !/ADRESYOK/i.test(b.kod || "") && !/adres yok/i.test(b.kapsam || ""))
         .map((b) => ({ ...b, ...(say[b.id] || { sokak: 0, hane: 0, kisi: 0, uye: 0 }) }));
       setListe(arr);
+      // Siteye bağlı haneler (sokak grubuna girmez) — bölge bazında sayısı
+      (async () => {
+        const map = {}; const ADIM = 1000;
+        for (let bas = 0; ; bas += ADIM) {
+          const { data, error } = await supabase.from("hane").select("bolge_id")
+            .eq("mahalle_id", mahalle.id).not("site_kayit_id", "is", null).range(bas, bas + ADIM - 1);
+          if (error) break;
+          (data || []).forEach((h) => { if (h.bolge_id) map[h.bolge_id] = (map[h.bolge_id] || 0) + 1; });
+          if (!data || data.length < ADIM) break;
+        }
+        setSiteHane(map);
+      })();
       const bIds = arr.map((b) => b.id);
       const gMap = {};
       if (bIds.length) {
@@ -184,6 +213,17 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
                 <span><b style={{ color: "var(--accent2)" }}>{fmt(b.uye)}</b> üye</span>
                 <span><b>{fmt((b.kisi || 0) - (b.uye || 0))}</b> üye değil</span>
               </div>
+              {siteHane[b.id] > 0 && (() => {
+                const serbest = Math.max(0, (b.hane || 0) - siteHane[b.id]);
+                const tamamen = serbest === 0;
+                return (
+                  <div style={{ fontSize: 11.5, color: tamamen ? "#3730a3" : "#92400e", background: tamamen ? "#eef2ff" : "#fef3c7", border: `1px solid ${tamamen ? "#c7d2fe" : "#fde68a"}`, borderRadius: 8, padding: "5px 9px", marginTop: 6, lineHeight: 1.35 }}>
+                    {tamamen
+                      ? <><b>Tamamı site kapsamında</b> ({fmt(siteHane[b.id])} hane) — sokak sorumlusu atanmaz, bölünmez. Site temsilcisi ve blok sorumluları <b>Siteler</b> sekmesinden atanır.</>
+                      : <><b>{fmt(siteHane[b.id])} hane site kapsamında</b> — site temsilcisi/blok sorumluları yönetir, sokak grubuna girmez. Sokak sorumlusunun ilgileneceği: <b>{fmt(serbest)} hane</b>.</>}
+                  </div>
+                );
+              })()}
               <KapsamSokaklar kapsam={b.kapsam} />
               <div className="atama-chips">
                 {b.sorumlu_id

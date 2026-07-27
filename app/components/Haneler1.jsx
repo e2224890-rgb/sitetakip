@@ -281,21 +281,10 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
     const resmi = String(h.blok_ad ?? "").trim();          // KEOS'tan gelen gerçek blok (ör. "B2")
     const harf = kapi.replace(/[0-9\s]/g, "").toLocaleUpperCase("tr"); // "12D" -> "D"
     const gercekBlok = resmi || (blok && blok.toLocaleUpperCase("tr") !== harf ? blok : "");
-    const daire = h.no != null && String(h.no).trim() !== "" ? String(h.no).trim() : "";
-
-    if (isSite) {
-      const p = [];
-      if (gercekBlok) p.push(`${gercekBlok} Blok`);
-      if (kapi) p.push(`Kapı ${kapi}`);
-      if (daire) p.push(`D:${daire}`);
-      return p.length ? p.join(" · ") : (haneBaslik(h, isSite) || "");
-    }
-    // SOKAK hanesi: adres alanı tam bilgiyi içeriyor ("21. SOKAK No:10 D:1")
-    const tam = String(h.adres ?? "").trim();
-    if (tam) return tam;
     const p = [];
+    if (gercekBlok) p.push(`${gercekBlok} Blok`);
     if (kapi) p.push(`Kapı ${kapi}`);
-    if (daire) p.push(`D:${daire}`);
+    if (h.no != null && String(h.no).trim() !== "") p.push(`D:${h.no}`);
     return p.length ? p.join(" · ") : (haneBaslik(h, isSite) || "");
   }
 
@@ -558,7 +547,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
                     <tr key={h.id} className={h.ziyaret ? "done" : ""}
                       style={h.ziyaret ? { background: "#d3f5e0", boxShadow: "inset 4px 0 0 #16a34a" } : undefined}>
                       <td>
-                        <b>{haneAd(h) || "—"}</b>
+                        <b>{(isSite ? haneAd(h) : haneBaslik(h, isSite)) || "—"}</b>
                         {isSite && h.adres && <div style={{ fontSize: 12, color: "#94a3b8", fontWeight: 400, marginTop: 2 }}>{h.adres}{h.kapi_no ? ` No ${h.kapi_no}` : ""}</div>}
                         {(uye > 0 || pot > 0) && (
                           <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 5 }}>

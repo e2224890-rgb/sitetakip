@@ -5,6 +5,7 @@ import { Building2, Compass, Users, UsersRound, ShieldCheck, ChevronRight, Home,
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { fmt, oran, NUF_RENK } from "../../lib/format";
 import { cacheOku, cacheYaz } from "../../lib/cache";
+import { ILCE_BASKANI, IL_SORUMLULAR } from "../../lib/constants";
 import StatCard from "./StatCard";
 
 // İlçe toplam nüfusu (seçmenden bağımsız, resmî/tahmini nüfus). İleride başka ilçe eklenince buraya yazılır.
@@ -20,6 +21,56 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
   const [hazir, setHazir] = useState(false);
   useEffect(() => { setHazir(true); }, []);
   const mahIdKey = (mahalleler || []).map((m) => m.mahalle_id).join(",");
+
+  // Ortalama yaş (yaş aralıklarının orta noktalarından ağırlıklı)
+  const ortYas = useMemo(() => {
+    const ORTA = { "18-24": 21, "25-34": 29.5, "35-44": 39.5, "45-54": 49.5, "55-64": 59.5, "65+": 70 };
+    let t = 0, n = 0;
+    ((toplam && toplam.yasArr) || []).forEach((y) => { const m = ORTA[y.ad]; if (m && y.deger) { t += m * y.deger; n += y.deger; } });
+    return n ? Math.round(t / n) : 0;
+  }, [toplam]);
+
+  // Cinsiyete göre ortalama yaş — tek sorgu (mv_mahalle_yas_cins) + önbellek → anında gelir
+  const [cinsYas, setCinsYas] = useState(null);
+  useEffect(() => {
+    const ids = (mahalleler || []).map((m) => m.mahalle_id).filter(Boolean);
+    if (!ids.length) { setCinsYas(null); return; }
+    const anahtar = `yascins:ilce:${mahIdKey}`;
+    const snap = cacheOku(anahtar);
+    if (snap) setCinsYas(snap); // ANINDA (önceki ziyaretten)
+    let iptal = false;
+    (async () => {
+      const yil = new Date().getFullYear();
+      let sonuc = null;
+      // 1) Hızlı yol: hazır özet görünüm
+      const { data, error } = await supabase.from("mv_mahalle_yas_cins").select("c, kisi, ort_dogum").in("mahalle_id", ids);
+      if (!error && data && data.length) {
+        const agg = {};
+        data.forEach((r) => {
+          const c = String(r.c || "").toLocaleUpperCase("tr").charAt(0);
+          if (!agg[c]) agg[c] = { n: 0, t: 0 };
+          agg[c].n += r.kisi || 0; agg[c].t += (r.kisi || 0) * Number(r.ort_dogum || 0);
+        });
+        const hes = (c) => (agg[c] && agg[c].n ? Math.round(yil - agg[c].t / agg[c].n) : 0);
+        sonuc = { e: hes("E"), k: hes("K") };
+      } else {
+        // 2) Yedek yol: görünüm yoksa yaş kovası sayımı
+        const KOVA = [[21, yil - 24, yil - 18], [29.5, yil - 34, yil - 25], [39.5, yil - 44, yil - 35], [49.5, yil - 54, yil - 45], [59.5, yil - 64, yil - 55], [70, 1900, yil - 65]];
+        const sor = async (harf) => {
+          const s = await Promise.all(KOVA.map(([, lo, hi]) =>
+            supabase.from("kisi").select("*", { count: "exact", head: true })
+              .in("mahalle_id", ids).ilike("cinsiyet", harf + "%").gte("dogum_yili", lo).lte("dogum_yili", hi)));
+          let t = 0, n = 0;
+          s.forEach((r, i) => { const c = r?.count || 0; t += KOVA[i][0] * c; n += c; });
+          return n ? Math.round(t / n) : 0;
+        };
+        const [e, k] = await Promise.all([sor("e"), sor("k")]);
+        sonuc = { e, k };
+      }
+      if (!iptal && sonuc && (sonuc.e || sonuc.k)) { setCinsYas(sonuc); cacheYaz(anahtar, sonuc); }
+    })();
+    return () => { iptal = true; };
+  }, [mahIdKey]);
   useEffect(() => {
     setDigerAcik(false);
     const ids = (mahalleler || []).map((m) => m.mahalle_id).filter(Boolean);
@@ -113,6 +164,26 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
       <div className="head"><div><h2 className="disp">{ilceAd || "Başakşehir"} · İlçe Teşkilatı</h2>
         <div className="sub">{mahalleler.length} mahalle · {fmt(bolgeToplam)} bölge</div></div>
         <span className="tag"><Compass size={13} /> {ilceAd || "Aktif Saha"}</span></div>
+
+      {/* İl/İlçe yönetimi — başkan + sorumlu il başkan yardımcıları */}
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+        {(() => {
+          const bas = (ad) => String(ad || "").trim().split(/\s+/).map((p) => p[0] || "").join("").slice(0, 2).toLocaleUpperCase("tr");
+          const kart = (ad, unvan, vurgu) => (
+            <div key={ad} style={{ display: "flex", alignItems: "center", gap: 10, background: vurgu ? "#fff4ec" : "#fff", border: `1px solid ${vurgu ? "#f0b083" : "#e5eaf2"}`, borderRadius: 11, padding: "10px 14px", flex: "1 1 240px", minWidth: 0 }}>
+              <div style={{ width: 34, height: 34, borderRadius: "50%", flex: "0 0 auto", background: vurgu ? "#f0b083" : "#e0edff", color: vurgu ? "#4a1b0c" : "#1e40af", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800 }}>{bas(ad)}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ad}</div>
+                <div style={{ fontSize: 11.5, color: "#64748b" }}>{unvan}</div>
+              </div>
+            </div>
+          );
+          return [
+            kart(ILCE_BASKANI.ad, `${ilceAd || "Başakşehir"} İlçe Başkanı`, true),
+            ...IL_SORUMLULAR.map((s) => kart(s.ad, s.unvan)),
+          ];
+        })()}
+      </div>
       <div className="grid-stats" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
         {ILCE_NUFUS[ilceAd || "Başakşehir"] != null &&
           <StatCard ic={<UsersRound size={15} />} lbl="Toplam Nüfus" num={fmt(ILCE_NUFUS[ilceAd || "Başakşehir"])} meta="2025 nüfusu" renk="#7c3aed" />}
@@ -127,14 +198,14 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
               <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "4px 10px" }}>
                 <span>Bölünmüş Sokak</span><b className="mono">{fmt(bolgeToplam)}</b>
                 <span>Kayıtlı sokak</span><b className="mono">{bolgeBilgi ? fmt(bolgeBilgi.sokak) : "…"}</b>
-                <span>Saha grubu (~150 kişi)</span><b className="mono" style={{ color: "#c2410c" }}>{bolgeBilgi ? fmt(bolgeBilgi.grup) : "…"}</b>
+                <span>Saha grubu (~150 hane)</span><b className="mono" style={{ color: "#c2410c" }}>{bolgeBilgi ? fmt(bolgeBilgi.grup) : "…"}</b>
                 <span>Gruplama bekleyen</span><b className="mono" style={{ color: bolgeBilgi && bolgeBilgi.bekleyen > 0 ? "#b45309" : "#15803d" }}>{bolgeBilgi ? fmt(bolgeBilgi.bekleyen) : "…"}</b>
                 <span>Birim başına ort. seçmen</span><b className="mono">{fmt(kisiBolgeOrt)}</b>
                 <span>Grup başına ort. seçmen</span><b className="mono">{grupKisiOrt ? fmt(grupKisiOrt) : "…"}</b>
                 <span>Birim başına ort. hane</span><b className="mono">{fmt(haneBolgeOrt)}</b>
               </div>
               <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #eef2f7", color: "#64748b" }}>
-                <b style={{ color: "#c2410c" }}>Planlama birimi gruptur (~150 seçmen), bölünmüş sokak değildir.</b> Her saha sorumlusu bir gruptan mesuldür; bölünmüş sokaklar ortalama {kisiBolgeOrt ? Math.max(1, Math.round(kisiBolgeOrt / 150)) : 2} saha grubuna ayrılır.{" "}
+                <b style={{ color: "#c2410c" }}>Planlama birimi gruptur (~150 hane), bölünmüş sokak değildir.</b> Her saha sorumlusu bir gruptan mesuldür; bölünmüş sokaklar ortalama {kisiBolgeOrt ? Math.max(1, Math.round(kisiBolgeOrt / 150)) : 2} saha grubuna ayrılır.{" "}
                 {bolgeBilgi ? (bolgeBilgi.bekleyen > 0
                   ? <span style={{ color: "#b45309" }}>{fmt(bolgeBilgi.bekleyen)} bölünmüş sokağın gruplaması tamamlanmamıştır; ilgili mahallenin "Sokaklar" ekranından gruplandırınız.</span>
                   : <span style={{ color: "#15803d", fontWeight: 600 }}>Seçmen kayıtlı tüm bölgelerin gruplaması tamamlanmıştır. ✓</span>) : ""}
@@ -185,7 +256,7 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
 
       <div className="demo-grid" style={{ marginTop: 15 }}>
         <div className="panel pad">
-          <div className="panel-h2"><h3>{ilceAd || "Başakşehir"} İlçesi Yaş Aralığı Grafiği</h3><span className="dim">{fmt(toplam.erkek + toplam.kadin)} kişi</span></div>
+          <div className="panel-h2"><h3>{ilceAd || "Başakşehir"} İlçesi Yaş Aralığı Grafiği</h3><span className="dim">{fmt(toplam.erkek + toplam.kadin)} kişi{ortYas ? ` · ort. ${ortYas} yaş` : ""}</span></div>
           {hazir ? (
             <ResponsiveContainer width="100%" height={210}>
               <BarChart data={toplam.yasArr} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
@@ -204,7 +275,16 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
             <div className="bar"><i style={{ width: `${oran(toplam.erkek, toplam.erkek + toplam.kadin)}%`, background: "#2563eb" }} /></div>
             <div className="cins-satir" style={{ marginTop: 14 }}><span className="cins-ad"><span className="dot" style={{ background: "#db2777" }} /> Kadın</span><b className="mono">{fmt(toplam.kadin)}</b></div>
             <div className="bar"><i style={{ width: `${oran(toplam.kadin, toplam.erkek + toplam.kadin)}%`, background: "#db2777" }} /></div>
-            <div className="cins-ozet">Erkek %{oran(toplam.erkek, toplam.erkek + toplam.kadin)} · Kadın %{oran(toplam.kadin, toplam.erkek + toplam.kadin)}</div>
+            <div className="cins-ozet" style={{ display: "flex", justifyContent: "center", gap: 18, flexWrap: "wrap", fontSize: 13.5, marginTop: 10, paddingTop: 10, borderTop: "1px solid #eef2f7" }}>
+              <span style={{ color: "#1d4ed8", fontWeight: 700 }}>
+                Erkek %{oran(toplam.erkek, toplam.erkek + toplam.kadin)}
+                {cinsYas?.e ? <span style={{ color: "#475569", fontWeight: 600 }}> · ort. <b style={{ color: "#1d4ed8" }}>{cinsYas.e}</b> yaş</span> : null}
+              </span>
+              <span style={{ color: "#be185d", fontWeight: 700 }}>
+                Kadın %{oran(toplam.kadin, toplam.erkek + toplam.kadin)}
+                {cinsYas?.k ? <span style={{ color: "#475569", fontWeight: 600 }}> · ort. <b style={{ color: "#be185d" }}>{cinsYas.k}</b> yaş</span> : null}
+              </span>
+            </div>
           </div>
         </div>
       </div>

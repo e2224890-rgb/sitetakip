@@ -57,7 +57,7 @@ export default function SokakBolStrip({ bolge, onChanged }) {
         ) : (
           <>
             <b style={{ fontSize: 14 }}>Sokağı sorumlulara böl</b>
-            <span style={{ fontSize: 12, color: "#94a3b8" }}>Kapı no sırasına göre ~{hedefBoy} kişilik gruplara böler (bir bina/kapı bütün kalır)</span>
+            <span style={{ fontSize: 12, color: "#94a3b8" }}>Kapı no sırasına göre ~{hedefBoy} hanelik gruplara böler (bina bütün kalır, siteye bağlı haneler hariç)</span>
             <div style={{ display: "flex", gap: 8, marginLeft: "auto", alignItems: "center" }}>
               <span style={{ fontSize: 12, color: "#475569" }}>Grup boyu:</span>
               <input type="number" min={20} step={10} value={hedefBoy} onChange={(e) => setHedefBoy(Math.max(20, parseInt(e.target.value || "150", 10)))}
