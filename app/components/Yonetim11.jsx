@@ -84,11 +84,8 @@ export default function Yonetim({ session, profil }) {
 
   const topla = (l) => {
     const s = (f) => l.reduce((a, m) => a + (m[f] || 0), 0);
-    // Üye sayısı geçici olarak sabit gösteriliyor (view güncellenene kadar)
-    const UYE_SABIT = 69661;
-    const uyeHam = s("uye");
     return {
-      kisi: s("kisi"), hane: s("hane"), uye: uyeHam < UYE_SABIT ? UYE_SABIT : uyeHam, erkek: s("erkek"), kadin: s("kadin"),
+      kisi: s("kisi"), hane: s("hane"), uye: s("uye"), erkek: s("erkek"), kadin: s("kadin"),
       yasArr: [
         { ad: "18-24", deger: s("y1824") }, { ad: "25-34", deger: s("y2534") },
         { ad: "35-44", deger: s("y3544") }, { ad: "45-54", deger: s("y4554") },
@@ -221,7 +218,7 @@ export default function Yonetim({ session, profil }) {
         )}
         {sayfa === "sorumlular" && <Sorumlular profil={profil} />}
         {sayfa === "siteler" && <SitelerSkorboard profil={profil} />}
-        {sayfa === "rapor" && <BaskanRapor profil={profil} secIlceId={secIlceId} />}
+        {sayfa === "rapor" && <BaskanRapor profil={profil} />}
         {sayfa === "yakinda" && (
           <div className="page"><div className="bos-modul"><Boxes size={34} />
             <h3>Bu modül yakında</h3><p>Bu bölüm sonraki aşamada eklenecek.</p></div></div>
