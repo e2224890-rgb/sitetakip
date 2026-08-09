@@ -5,11 +5,13 @@ import { supabase } from "../../lib/supabase";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ChevronRight, LogOut, UserCheck, Crown, Building2, Map } from "lucide-react";
 const Haneler = dynamic(() => import("./Haneler"), { ssr: false, loading: () => <div className="merkez">Yükleniyor…</div> });
+import SokakYonetim from "./SokakYonetim";
 
 export default function SahaGorunum({ session, profil, alan, baslik }) {
   // birim = bölge veya site (ikisi de tip alanıyla ayrışır)
   const [birimler, setBirimler] = useState(null);
   const [secBirim, setSecBirim] = useState(null);
+  const [gruplar, setGruplar] = useState([]); // seçili bölgenin sokak grupları (ekip paneli için)
 
   useEffect(() => {
     const snapAnahtar = `saha2:${alan}:${session.user.id}`;
@@ -37,6 +39,16 @@ export default function SahaGorunum({ session, profil, alan, baslik }) {
       cacheYaz(snapAnahtar, [...siteler, ...bolgeler]);
     })();
   }, []);
+
+  // Seçili bölgenin gruplarını çek -> her grup için Sokak Yönetimi paneli
+  useEffect(() => {
+    if (!secBirim || secBirim.tip !== "bolge") { setGruplar([]); return; }
+    (async () => {
+      const { data } = await supabase.from("sokak_grup")
+        .select("id, no, baskan_id, baskan_ad").eq("bolge_id", secBirim.id).order("no");
+      setGruplar(data || []);
+    })();
+  }, [secBirim?.id]);
 
   // Başlık: atanan yere göre -> yalnız site ise "Site Başkanı", yalnız bölge ise baslik ("Sorumlu")
   const unvan = birimler == null ? baslik : (() => {
@@ -68,6 +80,14 @@ export default function SahaGorunum({ session, profil, alan, baslik }) {
                   <div className="crumb"><a onClick={() => setSecBirim(null)}>Atananlarım</a>
                     <ChevronRight size={14} /><span className="cur">{secBirim.kod}</span></div>
                 )}
+                {secBirim.tip === "bolge" && gruplar.length === 0 && (
+                  <div className="panel" style={{ marginBottom: 14, fontSize: 13, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a" }}>
+                    Bu bölge henüz gruplara bölünmemiş — ekip kurmadan önce yönetim/ilçe bölmesi gerekir.
+                  </div>
+                )}
+                {secBirim.tip === "bolge" && gruplar.map((g) => (
+                  <SokakYonetim key={g.id} grup={g} userId={session.user.id} duzenle={true} />
+                ))}
                 <Haneler birim={secBirim} userId={session.user.id} />
               </>
             ) : (

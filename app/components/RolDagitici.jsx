@@ -12,6 +12,8 @@ const dyn = (yol) => dynamic(yol, { ssr: false, loading: Yukleniyor });
 const Yonetim = dyn(() => import("./Yonetim"));
 const KoordinatorGorunum = dyn(() => import("./KoordinatorGorunum"));
 const GrupBaskaniGorunum = dyn(() => import("./GrupBaskaniGorunum"));
+const MahalleBaskaniGorunum = dyn(() => import("./MahalleBaskaniGorunum"));
+const SifreDegistir = dyn(() => import("./SifreDegistir"));
 const BlokSorumluGorunum = dyn(() => import("./BlokSorumluGorunum"));
 const SahaGorunum = dyn(() => import("./SahaGorunum"));
 
@@ -24,7 +26,7 @@ export default function RolDagitici({ session }) {
     let iptal = false;
     (async () => {
       let { data, error } = await supabase.from("profiles")
-        .select("rol, ad_soyad, meslek, ilce_id, site_kayit_id, blok").eq("id", session.user.id).single();
+        .select("rol, ad_soyad, meslek, ilce_id, site_kayit_id, blok, mahalle_id, sifre_gecici").eq("id", session.user.id).single();
       // site_kayit_id/blok kolonları henüz yoksa (SQL 16 çalışmadıysa) sorgu hata verir —
       // bu durumda admini "sorumlu"ya düşürmemek için kolonsuz tekrar dene.
       if (error) {
@@ -41,10 +43,12 @@ export default function RolDagitici({ session }) {
   }, [session.user.id]);
 
   if (profil === undefined) return <Yukleniyor />;
+  if (profil.sifre_gecici) return <SifreDegistir session={session} onBitti={() => { const t = { ...profil, sifre_gecici: false }; setProfil(t); cacheYaz(cacheAnahtar, t); }} />;
   const rol = profil.rol;
   if (rol === "il_yonetimi" || rol === "ilce_yonetimi") return <Yonetim session={session} profil={profil} />;
   if (rol === "koordinator") return <KoordinatorGorunum session={session} profil={profil} />;
   if (rol === "grup_baskani") return <GrupBaskaniGorunum session={session} profil={profil} />;
+  if (rol === "mahalle_baskani") return <MahalleBaskaniGorunum session={session} profil={profil} />;
   if (["blok_sorumlu", "ana_kademe", "kadin_kollari", "genclik_kollari", "site_teskilat", "site_sosyal", "site_sekreter"].includes(rol)) return <BlokSorumluGorunum session={session} profil={profil} />;
   return <SahaGorunum session={session} profil={profil} alan="sorumlu_id" baslik="Sorumlu" />;
 }

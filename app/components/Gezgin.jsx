@@ -14,6 +14,18 @@ const ILCE_NUFUS = { "Başakşehir": 536797 };
 export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec }) {
   // İlçe geneli nüfus (memleket) il dağılımı — ilçenin tüm mahallelerinden toplanır
   const [nufIl, setNufIl] = useState(null);
+  // İlçe kadrosu (ilçe başkanı + il sorumluları) — teskilat tablosundan
+  const [ilceKadro, setIlceKadro] = useState({ baskan: null, sorumlular: [] });
+  const kadroMid = (mahalleler || []).map((m) => m.mahalle_id).filter(Boolean)[0];
+  useEffect(() => {
+    if (!kadroMid) return;
+    (async () => {
+      const { data: m } = await supabase.from("mahalle").select("ilce_id").eq("id", kadroMid).single();
+      const iid = m?.ilce_id; if (!iid) return;
+      const { data } = await supabase.from("teskilat").select("unvan, ad_soyad, telefon, gorev_metin, sira").eq("ilce_id", iid).in("unvan", ["ilce_baskani", "il_sorumlu"]).order("sira");
+      setIlceKadro({ baskan: (data || []).find((r) => r.unvan === "ilce_baskani") || null, sorumlular: (data || []).filter((r) => r.unvan === "il_sorumlu") });
+    })();
+  }, [kadroMid]);
   const [nufHata, setNufHata] = useState(null);
   const [digerAcik, setDigerAcik] = useState(false);
   // Recharts ResponsiveContainer, hard-refresh'te kabı 0px ölçüp boş çizebiliyor;
@@ -178,9 +190,13 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
               </div>
             </div>
           );
+          const basAd = ilceKadro.baskan?.ad_soyad || ILCE_BASKANI.ad;
+          const sorumlular = ilceKadro.sorumlular.length
+            ? ilceKadro.sorumlular.map((r) => ({ ad: r.ad_soyad, unvan: r.gorev_metin || "İl Sorumlusu" }))
+            : IL_SORUMLULAR;
           return [
-            kart(ILCE_BASKANI.ad, `${ilceAd || "Başakşehir"} İlçe Başkanı`, true),
-            ...IL_SORUMLULAR.map((s) => kart(s.ad, s.unvan)),
+            kart(basAd, `${ilceAd || "Başakşehir"} İlçe Başkanı`, true),
+            ...sorumlular.map((s) => kart(s.ad, s.unvan)),
           ];
         })()}
       </div>

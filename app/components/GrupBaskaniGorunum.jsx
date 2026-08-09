@@ -16,10 +16,17 @@ export default function GrupBaskaniGorunum({ session, profil }) {
     const snap = cacheOku(snapAnahtar);
     if (snap) setGruplar(snap); // son bilinen liste ANINDA
     (async () => {
-      const { data: gs } = await supabase.from("sokak_grup")
-        .select("id, no, memleketler, baskan_ad, baskan_tel, baskan_memleket, baskan_id, bolge_id")
-        .eq("baskan_id", session.user.id).order("no");
-      const liste = gs || [];
+      const SEL = "id, no, memleketler, baskan_ad, baskan_tel, baskan_memleket, baskan_id, bolge_id";
+      // 1) BAŞKANI olduğum gruplar (eski davranış)
+      const { data: basG } = await supabase.from("sokak_grup").select(SEL).eq("baskan_id", session.user.id);
+      // 2) ekip ÜYESİ olduğum gruplar — sokak_ekip.profil_id = ben → sorumlunun bölgesini görürüm
+      const { data: ekR } = await supabase.from("sokak_ekip").select("grup_id").eq("profil_id", session.user.id);
+      const ekIds = [...new Set((ekR || []).map((e) => e.grup_id).filter(Boolean))];
+      let ekG = [];
+      if (ekIds.length) { const { data } = await supabase.from("sokak_grup").select(SEL).in("id", ekIds); ekG = data || []; }
+      // birleştir + tekrarı ele + no'ya göre sırala
+      const gMap = {}; [...(basG || []), ...ekG].forEach((g) => { gMap[g.id] = g; });
+      const liste = Object.values(gMap).sort((a, b) => (a.no || 0) - (b.no || 0));
       const bIds = [...new Set(liste.map((g) => g.bolge_id).filter(Boolean))];
       let bMap = {};
       if (bIds.length) {
@@ -46,7 +53,7 @@ export default function GrupBaskaniGorunum({ session, profil }) {
     return (
       <div className="app saha"><header className="saha-bar">
         <div className="brand"><div className="logo"><UserCheck size={18} /></div>
-          <div><div className="brand-t">Grup Başkanı · {profil.ad_soyad || session.user.email}</div>
+          <div><div className="brand-t">Sokak Yönetimi · {profil.ad_soyad || session.user.email}</div>
             <div className="brand-s">{sec.bolge.kod}-{sec.no}</div></div></div>
         <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış</button>
       </header>
@@ -62,7 +69,7 @@ export default function GrupBaskaniGorunum({ session, profil }) {
     <div className="app saha">
       <header className="saha-bar">
         <div className="brand"><div className="logo"><UserCheck size={18} /></div>
-          <div><div className="brand-t">Grup Başkanı · {profil.ad_soyad || session.user.email}</div>
+          <div><div className="brand-t">Sokak Yönetimi · {profil.ad_soyad || session.user.email}</div>
             <div className="brand-s">Saha Teşkilatı</div></div></div>
         <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış</button>
       </header>

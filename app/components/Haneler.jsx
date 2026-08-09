@@ -7,6 +7,7 @@ import { NUF_RENK, csvIndir, fmt, haneBaslik, oran, sokakAdres, yakRenk } from "
 import { yaklasimBilgi, YAKLASIM_LISTE } from "../../lib/constants";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import GrupBaskanPanel from "./GrupBaskanPanel";
+import EkipRozet from "./EkipRozet";
 import SokakBolStrip from "./SokakBolStrip";
 import Sorumlular from "./Sorumlular";
 import ZiyaretModal from "./ZiyaretModal";
@@ -42,6 +43,45 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
   const [profiller, setProfiller] = useState([]);
   const [atandi, setAtandi] = useState("");
   const [grupAd, setGrupAd] = useState(grup ? (grup.baskan_ad || "") : "");
+  // --- Seçmenden Sokak Başkanı ata (hesap otomatik açılır) ---
+  const [baskanMesgul, setBaskanMesgul] = useState(null); // atama sırasında kisi.id
+  const [baskanModal, setBaskanModal] = useState(null);   // { asama:"onay"|"islem"|"sonuc"|"hata", ... }
+  const trSlug = (t) => (t || "").toLocaleLowerCase("tr")
+    .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c")
+    .replace(/[^a-z0-9]/g, "");
+  // Butondan: onay modalını aç
+  function baskanYapAc(k, h) {
+    const gid = grup?.id || h?.grup_id;
+    if (!gid) { setBaskanModal({ asama: "hata", mesaj: "Bu kişinin hanesi bir sokak grubuna atanmamış. Önce sokağı gruplara bölün." }); return; }
+    setBaskanModal({ asama: "onay", k, gid, ad: `${k.ad} ${k.soyad}`.trim() });
+  }
+  // Onaylandıktan sonra: hesabı aç + başkan ata
+  async function baskanYapOnayla() {
+    const m = baskanModal; if (!m || m.asama !== "onay") return;
+    setBaskanModal({ ...m, asama: "islem" });
+    try {
+      const eposta = `${trSlug(m.k.ad) || "ad"}.${trSlug(m.k.soyad) || "soyad"}@akpartibasaksehir.com`;
+      const { data: { session } } = await supabase.auth.getSession();
+      const r = await fetch("/api/hesap-ekle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({
+          ad_soyad: m.ad, eposta, sifre: "saha2026", benzersizEposta: true, sifre_gecici: true,
+          rol: "sorumlu", telefon: m.k.telefon || null,
+          grup_id: m.gid, kisi_id: m.k.id, gorev: "baskan",
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "atama başarısız");
+      setGrupAd(m.ad);
+      if (j.id && !grup) setSorumluId(j.id);   // bölge badge/dropdown yeni sorumluyu göstersin
+      await profilleriYukle();                 // yeni sorumlu listeye girsin (ad çözülsün)
+      yukle();                                 // hane/ekip verisini tazele (tam sayfa reload yok)
+      setBaskanModal({ asama: "sonuc", ad: m.ad, eposta: j.eposta || eposta, sifre: "saha2026" });
+    } catch (e) {
+      setBaskanModal({ asama: "hata", mesaj: "Sokak başkanı atanamadı: " + (e?.message || e) });
+    }
+  }
   const [zModal, setZModal] = useState(null);
   const [digerAcik, setDigerAcik] = useState(false);
   const [nufBlok, setNufBlok] = useState("");
@@ -67,14 +107,12 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
 
   useEffect(() => { setSorumluId(birim.sorumlu_id || ""); setKoordId(birim.koordinator_id || ""); }, [birim.id]);
 
-  useEffect(() => {
-    if (!yonetici) return;
-    (async () => {
-      const { data } = await supabase.from("profiles")
-        .select("id, ad_soyad, eposta, rol").in("rol", ["sorumlu", "koordinator"]).order("ad_soyad");
-      setProfiller(data || []);
-    })();
-  }, [yonetici]);
+  async function profilleriYukle() {
+    const { data } = await supabase.from("profiles")
+      .select("id, ad_soyad, eposta, rol").in("rol", ["sorumlu", "koordinator"]).order("ad_soyad");
+    setProfiller(data || []);
+  }
+  useEffect(() => { if (yonetici) profilleriYukle(); }, [yonetici]);
 
   const sorumlular = useMemo(() => profiller.filter((p) => p.rol === "sorumlu"), [profiller]);
   const koordinatorler = useMemo(() => profiller.filter((p) => p.rol === "koordinator"), [profiller]);
@@ -100,7 +138,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
     const snap = cacheOku(haneCacheKey);
     if (snap && snap.length) setHaneler(snap); else setHaneler(null);
     try {
-      const hq = supabase.from("hane").select("id, no, adres, kapi_no, kapi_blok, blok_ad, ilce_id").order("no");
+      const hq = supabase.from("hane").select("id, no, adres, kapi_no, kapi_blok, blok_ad, ilce_id, grup_id").order("no");
       const _hr = await (isSite ? hq.eq("site_kayit_id", birim.id) : hq.eq("bolge_id", birim.id).is("site_kayit_id", null));
       if (_hr.error) throw _hr.error;
       let hRows = _hr.data || [];
@@ -328,13 +366,13 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
       <div className="head"><div><h2 className="disp">{grup ? `${birim.kod}-${grup.no}` : birim.kod}</h2><div className="sub">{birim.kapsam || "—"}</div></div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {grup
-            ? <span className="tag" style={{ background: grupAd ? "var(--ok-weak)" : "var(--surface2)", color: grupAd ? "var(--ok)" : "var(--ink2)", borderColor: grupAd ? "#9ccfc7" : "var(--border)" }}><UserCheck size={13} /> Sorumlu: {grupAd || "atanmadı"}</span>
-            : yonetici && <span className="tag" style={{ background: sorumluId ? "var(--ok-weak)" : "var(--surface2)", color: sorumluId ? "var(--ok)" : "var(--ink2)", borderColor: sorumluId ? "#9ccfc7" : "var(--border)" }}>
-            <UserCheck size={13} /> {isSite ? "AK Parti Site Temsilcisi" : "Sorumlu"}: {sorumluId ? (adById[sorumluId] || "atandı") : "atanmadı"}</span>}
+            ? <EkipRozet grupId={grup.id} cocuk={<span className="tag" style={{ background: grupAd ? "var(--ok-weak)" : "var(--surface2)", color: grupAd ? "var(--ok)" : "var(--ink2)", borderColor: grupAd ? "#9ccfc7" : "var(--border)" }}><UserCheck size={13} /> Sorumlu: {grupAd || "atanmadı"}</span>} />
+            : yonetici && <EkipRozet bolgeId={birim.id} cocuk={<span className="tag" style={{ background: sorumluId ? "var(--ok-weak)" : "var(--surface2)", color: sorumluId ? "var(--ok)" : "var(--ink2)", borderColor: sorumluId ? "#9ccfc7" : "var(--border)" }}>
+            <UserCheck size={13} /> {isSite ? "AK Parti Site Temsilcisi" : "Sorumlu"}: {sorumluId ? (adById[sorumluId] || "atandı") : "atanmadı"}</span>} />}
           <span className="tag"><Users size={13} /> {fmt(tHane)} hane · {fmt(kSay)} seçmen</span>
         </div></div>
 
-      {grup && <GrupBaskanPanel grup={grup} onAtandi={(id, ad) => setGrupAd(ad || "")} />}
+{grup && yonetici && <GrupBaskanPanel grup={grup} onAtandi={(id, ad) => setGrupAd(ad || "")} />}
 
       {yonetici && !grup && (
         <div className="panel" style={{ marginBottom: 14 }}>
@@ -585,6 +623,9 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
                               : potK
                                 ? <span style={{ fontSize: 10.5, fontWeight: 800, background: "#e0edff", color: "#1d4ed8", border: "1px solid #93c5fd", padding: "1px 7px", borderRadius: 999, marginLeft: 5 }}>POTANSİYEL</span>
                                 : <span style={{ fontSize: 10.5, fontWeight: 800, background: "#e7f6ec", color: "#15803d", border: "1px solid #a7e3bd", padding: "1px 7px", borderRadius: 999, marginLeft: 5 }}>ÜYE DEĞİL</span>}
+                            {yonetici && <button onClick={(e) => { e.stopPropagation(); baskanYapAc(k, h); }}
+                              title="Sokak başkanı yap" style={{ marginLeft: 6, border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 999, padding: "1px 8px", fontSize: 10.5, cursor: "pointer", color: "#92400e", fontWeight: 700 }}>
+                              👑 Başkan yap</button>}
                           </span>
                         );
                       })}{h.kisiler.length === 0 && <span className="dim">—</span>}</td>
@@ -648,6 +689,85 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
           {renkAciklama}
         </div>
       )}
+      {baskanModal && (() => {
+        const M = baskanModal;
+        const kap = () => setBaskanModal(null);
+        const kopyala = (t) => { try { navigator.clipboard?.writeText(t); } catch (_) {} };
+        const ov = { position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", backdropFilter: "blur(2px)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 };
+        const kart = { width: "100%", maxWidth: 420, background: "#fff", borderRadius: 16, boxShadow: "0 24px 60px rgba(0,0,0,0.25)", overflow: "hidden", fontFamily: "inherit" };
+        const bas = { padding: "18px 20px 0" };
+        const govde = { padding: "14px 20px 20px" };
+        const btnBirincil = { flex: 1, padding: "11px", border: "none", borderRadius: 10, background: "#cf5a26", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" };
+        const btnIkincil = { flex: 1, padding: "11px", border: "1px solid #e5e7eb", borderRadius: 10, background: "#fff", color: "#475569", fontSize: 14, fontWeight: 600, cursor: "pointer" };
+        const satir = { display: "flex", alignItems: "center", gap: 8, background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 12px", marginTop: 8 };
+        const kopyaBtn = { marginLeft: "auto", fontSize: 12, fontWeight: 700, color: "#2563eb", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "4px 10px", cursor: "pointer", whiteSpace: "nowrap" };
+
+        return (
+          <div style={ov} onClick={kap}>
+            <div style={kart} onClick={(e) => e.stopPropagation()}>
+              {(M.asama === "onay" || M.asama === "islem") && (
+                <>
+                  <div style={bas}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: "#fff7ed", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, marginBottom: 10 }}>👑</div>
+                    <h3 style={{ margin: 0, fontSize: 18, color: "#0f172a" }}>Sokak Başkanı ata</h3>
+                    <p style={{ margin: "6px 0 0", fontSize: 14, color: "#475569", lineHeight: 1.5 }}>
+                      <b style={{ color: "#0f172a" }}>{M.ad}</b> bu grubun sokak başkanı olsun mu?
+                    </p>
+                  </div>
+                  <div style={govde}>
+                    <div style={{ fontSize: 12.5, color: "#64748b", background: "#f8fafc", border: "1px solid #eef2f7", borderRadius: 10, padding: "10px 12px", marginBottom: 14, lineHeight: 1.5 }}>
+                      Giriş hesabı otomatik açılır. Geçici şifre <b>saha2026</b>; kişi ilk girişte kendi şifresini belirler.
+                    </div>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button style={btnIkincil} onClick={kap} disabled={M.asama === "islem"}>İptal</button>
+                      <button style={{ ...btnBirincil, opacity: M.asama === "islem" ? 0.7 : 1 }} onClick={baskanYapOnayla} disabled={M.asama === "islem"}>
+                        {M.asama === "islem" ? "Atanıyor…" : "Onayla ve ata"}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {M.asama === "sonuc" && (
+                <>
+                  <div style={bas}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: "#ecfdf5", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, marginBottom: 10 }}>✓</div>
+                    <h3 style={{ margin: 0, fontSize: 18, color: "#0f172a" }}>{M.ad} atandı</h3>
+                    <p style={{ margin: "6px 0 0", fontSize: 13.5, color: "#475569" }}>Giriş bilgisini kişiye ilet:</p>
+                  </div>
+                  <div style={govde}>
+                    <div style={satir}>
+                      <span style={{ fontSize: 11, color: "#94a3b8", width: 54 }}>E-posta</span>
+                      <b style={{ fontSize: 13, color: "#0f172a", wordBreak: "break-all" }}>{M.eposta}</b>
+                      <button style={kopyaBtn} onClick={() => kopyala(M.eposta)}>Kopyala</button>
+                    </div>
+                    <div style={satir}>
+                      <span style={{ fontSize: 11, color: "#94a3b8", width: 54 }}>Şifre</span>
+                      <b style={{ fontSize: 13, color: "#0f172a" }}>{M.sifre}</b>
+                      <button style={kopyaBtn} onClick={() => kopyala(M.sifre)}>Kopyala</button>
+                    </div>
+                    <div style={{ fontSize: 12, color: "#047857", marginTop: 10 }}>Kişi ilk girişte kendi şifresini belirleyecek.</div>
+                    <button style={{ ...btnBirincil, width: "100%", marginTop: 16, background: "#0f172a" }} onClick={kap}>Tamam</button>
+                  </div>
+                </>
+              )}
+
+              {M.asama === "hata" && (
+                <>
+                  <div style={bas}>
+                    <div style={{ width: 44, height: 44, borderRadius: 12, background: "#fef2f2", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, marginBottom: 10 }}>!</div>
+                    <h3 style={{ margin: 0, fontSize: 18, color: "#0f172a" }}>Olmadı</h3>
+                    <p style={{ margin: "8px 0 0", fontSize: 14, color: "#b91c1c", lineHeight: 1.5 }}>{M.mesaj}</p>
+                  </div>
+                  <div style={govde}>
+                    <button style={{ ...btnBirincil, width: "100%" }} onClick={kap}>Kapat</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </>
   );
 }

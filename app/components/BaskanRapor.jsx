@@ -3,6 +3,9 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
 import { fmt, oran, yakRenk, normBlok, blokParts } from "../../lib/format";
 import { yaklasimBilgi, ILCE_BASKANI, MAHALLE_TESKILAT, MAHALLE_NUFUS } from "../../lib/constants";
+import TeskilatYonetim from "./TeskilatYonetim";
+import EkipRozet from "./EkipRozet";
+import Talepler from "./Talepler";
 import { StickyNote, ClipboardCheck, Boxes, UserCheck, Search, LayoutDashboard, TrendingUp, Network, AlertTriangle, Users, Home, ShieldCheck, MapPin } from "lucide-react";
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
 
@@ -53,6 +56,142 @@ export default function BaskanRapor({ profil }) {
   const [mahFiltre, setMahFiltre] = useState(""); // "" = tüm ilçe, yoksa mahalle_id
   const [yuk, setYuk] = useState({});      // { tab: true } -> yüklendi
   const [mesgul, setMesgul] = useState(false);
+  // Teşkilat: DB tablosundan (statik MAHALLE_TESKILAT yerine) + düzenleme
+  const [teskilatMah, setTeskilatMah] = useState(null); // [{ mahalle_id, ad, baskan, yurutme, yk[], meclis[], bby }]
+  const [sokakSor, setSokakSor] = useState(null); // sokak sorumlusu/ekip durumu
+  const [yonetimler, setYonetimler] = useState(null); // tüm gruplar + ekip (başkan+üyeler)
+  const [secmenRapor, setSecmenRapor] = useState(null); // { 1:[], 3:[], 5:[] } renk -> kişiler
+  const [renkSec, setRenkSec] = useState(5); // 1 siyah, 3 gri, 5 beyaz
+  async function secmenRaporYukle() {
+    const { data: zs } = await supabase.from("ziyaret").select("hane_id, yaklasim").in("yaklasim", [1, 3, 5]);
+    const haneRenk = {}; (zs || []).forEach((z) => { if (z.hane_id) haneRenk[z.hane_id] = z.yaklasim; });
+    const haneIds = Object.keys(haneRenk);
+    if (!haneIds.length) { setSecmenRapor({ 1: [], 3: [], 5: [] }); return; }
+    const haneler = await parcaliIn("hane", "id, adres, kapi_no, no, site_kayit_id", haneIds, "id");
+    const haneAdres = {}; const haneSite = {};
+    (haneler || []).forEach((h) => { haneAdres[h.id] = [h.adres || h.no || "", h.kapi_no ? "No " + h.kapi_no : ""].filter(Boolean).join(" ").trim(); if (h.site_kayit_id) haneSite[h.id] = h.site_kayit_id; });
+    const siteIds = [...new Set(Object.values(haneSite))];
+    const siteAd = {};
+    if (siteIds.length) { const sk = await parcaliIn("site_kayit", "id, ad", siteIds, "id"); (sk || []).forEach((s2) => { siteAd[s2.id] = s2.ad || ""; }); }
+    const kisiler = await parcaliIn("kisi", "id, ad, soyad, telefon, hane_id, mahalle_id, secmen", haneIds, "hane_id");
+    const grup = { 1: [], 3: [], 5: [] };
+    (kisiler || []).forEach((k) => { const renk = haneRenk[k.hane_id]; if (grup[renk]) grup[renk].push({ ad: k.ad, soyad: k.soyad, telefon: k.telefon || "", mahalle_id: k.mahalle_id, adres: haneAdres[k.hane_id] || "", site: siteAd[haneSite[k.hane_id]] || "" }); });
+    setSecmenRapor(grup);
+  }
+  function secmenDisaAktar() {
+    if (!secmenRapor) return;
+    const renkAd = renkSec === 1 ? "Siyah - Başka Parti" : renkSec === 3 ? "Gri - Kararsız" : "Beyaz - AK Parti";
+    const q = (ara || "").toLocaleLowerCase("tr").trim();
+    let liste = (secmenRapor[renkSec] || []).filter((k) => !mahFiltre || k.mahalle_id === mahFiltre);
+    if (q) liste = liste.filter((k) => `${k.ad} ${k.soyad}`.toLocaleLowerCase("tr").includes(q));
+    if (!liste.length) { alert("Aktarılacak kayıt yok."); return; }
+    const esc = (v) => `"${String(v == null ? "" : v).replace(/"/g, "\"\"")}"`;
+    const baslik = ["Ad", "Soyad", "Mahalle", "Site", "Adres", "Telefon", "Yaklaşım"];
+    const satir = liste.map((k) => [k.ad, k.soyad, mahAd[k.mahalle_id] || "", k.site || "", k.adres || "", k.telefon || "", renkAd].map(esc).join(";"));
+    const csv = "\uFEFF" + [baslik.map(esc).join(";"), ...satir].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const renkDosya = renkSec === 1 ? "siyah" : renkSec === 3 ? "gri" : "beyaz";
+    const mahDosya = mahFiltre ? "_" + (mahAd[mahFiltre] || "").replace(/\s+/g, "_") : "";
+    a.href = url; a.download = `secmen_${renkDosya}${mahDosya}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }
+  async function yonetimlerYukle() {
+    const [gr, bo, ek] = await Promise.all([
+      supabase.from("sokak_grup").select("id, no, bolge_id, baskan_id, baskan_ad"),
+      supabase.from("bolge").select("id, kod, mahalle_id"),
+      supabase.from("sokak_ekip").select("grup_id, gorev, ad_soyad, telefon"),
+    ]);
+    const bMap = {}; (bo.data || []).forEach((b) => bMap[b.id] = b);
+    const byGrup = {}; (ek.data || []).forEach((e) => { (byGrup[e.grup_id] = byGrup[e.grup_id] || []).push(e); });
+    const liste = (gr.data || []).map((g) => {
+      const b = bMap[g.bolge_id] || {};
+      const rows = byGrup[g.id] || [];
+      const baskan = rows.find((r) => r.gorev === "baskan") || (g.baskan_ad ? { ad_soyad: g.baskan_ad, telefon: null } : null);
+      const uyeler = rows.filter((r) => r.gorev !== "baskan");
+      return { id: g.id, kod: `${b.kod || "?"}-${g.no}`, mahalle_id: b.mahalle_id, atanmis: !!g.baskan_id, baskan, uyeler, kisi: (baskan ? 1 : 0) + uyeler.length };
+    });
+    setYonetimler(liste);
+  }
+  async function sokakSorYukle() {
+    const [gr, bo, ek] = await Promise.all([
+      supabase.from("sokak_grup").select("id, no, bolge_id, baskan_id, baskan_ad"),
+      supabase.from("bolge").select("id, kod, mahalle_id"),
+      supabase.from("sokak_ekip").select("grup_id, gorev"),
+    ]);
+    const bMap = {}; (bo.data || []).forEach((b) => bMap[b.id] = b);
+    const uye = {}; (ek.data || []).forEach((e) => { if (e.gorev === "uye") uye[e.grup_id] = (uye[e.grup_id] || 0) + 1; });
+    const liste = (gr.data || []).map((g) => {
+      const b = bMap[g.bolge_id] || {};
+      return { id: g.id, kod: `${b.kod || "?"}-${g.no}`, mahalle_id: b.mahalle_id, atanmis: !!g.baskan_id, sorumlu: g.baskan_ad || "", uye: uye[g.id] || 0 };
+    });
+    setSokakSor(liste);
+  }
+  const [duzenleMah, setDuzenleMah] = useState(null);   // { mahalle_id, ad }
+  const yonetici = ["ilce_yonetimi", "il_yonetimi"].includes(profil?.rol);
+  const ilYonetici = profil?.rol === "il_yonetimi";
+  const [ilceBaskan, setIlceBaskan] = useState(null);
+  const [ibForm, setIbForm] = useState(null); // { ad, tel, hesap, mesgul?, sonuc? }
+  const [ilSorumlular, setIlSorumlular] = useState([]);
+  const [ilSorForm, setIlSorForm] = useState(null); // { ad, gorev, tel }
+  async function ilceBaskanYukle() {
+    if (!ilceId) { setIlceBaskan(null); return; }
+    const { data } = await supabase.from("teskilat").select("id, ad_soyad, telefon, profil_id").eq("unvan", "ilce_baskani").eq("ilce_id", ilceId).maybeSingle();
+    setIlceBaskan(data || null);
+  }
+  async function ilceBaskanKaydet() {
+    if (!ibForm.ad.trim()) return;
+    setIbForm((f) => ({ ...f, mesgul: true }));
+    try {
+      let profil_id = ilceBaskan?.profil_id || null; let sonuc = null;
+      if (ibForm.hesap) {
+        const slug = (t) => (t || "").toLocaleLowerCase("tr").replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c").replace(/[^a-z0-9]/g, "");
+        const eposta = `${slug(ibForm.ad) || "ilcebaskan"}@akpartibasaksehir.com`;
+        const { data: { session } } = await supabase.auth.getSession();
+        const r = await fetch("/api/hesap-ekle", { method: "POST", headers: { "Content-Type": "application/json", authorization: `Bearer ${session.access_token}` },
+          body: JSON.stringify({ ad_soyad: ibForm.ad.trim(), eposta, sifre: "saha2026", benzersizEposta: true, sifre_gecici: true, rol: "ilce_yonetimi", ilce_id: ilceId, telefon: ibForm.tel.trim() || null }) });
+        const j = await r.json(); if (!r.ok) throw new Error(j.error || "hesap açılamadı");
+        profil_id = j.id; sonuc = { eposta: j.eposta || eposta, sifre: "saha2026" };
+      }
+      await supabase.from("teskilat").delete().eq("unvan", "ilce_baskani").eq("ilce_id", ilceId);
+      await supabase.from("teskilat").insert({ ilce_id: ilceId, mahalle_id: null, unvan: "ilce_baskani", ad_soyad: ibForm.ad.trim(), telefon: ibForm.tel.trim() || null, sira: 0, profil_id });
+      await ilceBaskanYukle();
+      if (sonuc) setIbForm((f) => ({ ...f, mesgul: false, sonuc })); else setIbForm(null);
+    } catch (e) { alert("Kaydedilemedi: " + (e?.message || e)); setIbForm((f) => ({ ...f, mesgul: false })); }
+  }
+  async function ilSorumluYukle() {
+    if (!ilceId) { setIlSorumlular([]); return; }
+    const { data } = await supabase.from("teskilat").select("id, ad_soyad, telefon, gorev_metin, sira").eq("ilce_id", ilceId).eq("unvan", "il_sorumlu").order("sira");
+    setIlSorumlular(data || []);
+  }
+  async function ilSorumluEkle() {
+    const d = ilSorForm; if (!d || !d.ad.trim()) return;
+    try {
+      const { error } = await supabase.from("teskilat").insert({ ilce_id: ilceId, mahalle_id: null, unvan: "il_sorumlu", ad_soyad: d.ad.trim(), gorev_metin: (d.gorev || "").trim() || "İl Sorumlusu", telefon: (d.tel || "").trim() || null, sira: ilSorumlular.length });
+      if (error) throw error;
+      setIlSorForm(null); await ilSorumluYukle();
+    } catch (e) { alert("Eklenemedi: " + (e?.message || e)); }
+  }
+  async function ilSorumluSil(row) {
+    if (!confirm(`${row.ad_soyad} il sorumlularından çıkarılsın mı?`)) return;
+    await supabase.from("teskilat").delete().eq("id", row.id); await ilSorumluYukle();
+  }
+  async function teskilatYukle() {
+    const { data: mahs } = await supabase.from("mahalle").select("id, ad").order("ad");
+    const { data: rows } = await supabase.from("teskilat").select("mahalle_id, unvan, ad_soyad, telefon, kadin, sira").order("sira");
+    const byMah = {};
+    (mahs || []).forEach((m) => { byMah[m.id] = { mahalle_id: m.id, ad: m.ad, baskan: null, yurutme: null, yk: [], meclis: [], bby: null }; });
+    (rows || []).forEach((r) => {
+      const g = byMah[r.mahalle_id]; if (!g) return;
+      const k = { ad: r.ad_soyad, tel: r.telefon || "", k: !!r.kadin };
+      if (r.unvan === "baskan") g.baskan = k; else if (r.unvan === "yurutme") g.yurutme = k;
+      else if (r.unvan === "yk") g.yk.push(k); else if (r.unvan === "meclis") g.meclis.push(k); else if (r.unvan === "bby") g.bby = k;
+    });
+    // sadece en az bir kaydı olan mahalleleri göster
+    setTeskilatMah(Object.values(byMah).filter((g) => g.baskan || g.yurutme || g.yk.length || g.meclis.length || g.bby));
+  }
+
   const [mahAd, setMahAd] = useState({});  // mahalle_id -> ad
   const [d, setD] = useState({ notlar: [], sokak: [], site: [], bloklar: [], siteSor: [] });
 
@@ -65,8 +204,11 @@ export default function BaskanRapor({ profil }) {
   })(); }, []);
 
   useEffect(() => { if (ilceId && !yuk[tab]) yukle(tab); }, [ilceId, tab]);
+  useEffect(() => { if (tab === "teskilat") { if (teskilatMah === null) teskilatYukle(); ilceBaskanYukle(); ilSorumluYukle(); } }, [tab, ilceId]);
+  useEffect(() => { if (tab === "yonetimler" && yonetimler === null) yonetimlerYukle(); }, [tab]);
+  useEffect(() => { if (tab === "secmen" && secmenRapor === null) secmenRaporYukle(); }, [tab]);
   // Eksikler sekmesi blok + site sorumlusu verisine dayanır — ikisini de yükle
-  useEffect(() => { if (ilceId && tab === "eksik") { if (!yuk["bloklar"]) yukle("bloklar"); if (!yuk["siteSor"]) yukle("siteSor"); } }, [ilceId, tab]);
+  useEffect(() => { if (ilceId && tab === "eksik") { if (!yuk["bloklar"]) yukle("bloklar"); if (!yuk["siteSor"]) yukle("siteSor"); if (sokakSor === null) sokakSorYukle(); } }, [ilceId, tab]);
 
   async function yukle(t) {
     setMesgul(true);
@@ -172,6 +314,9 @@ export default function BaskanRapor({ profil }) {
     ["ilerleme", "Saha İlerleme", <TrendingUp size={15} key="e" />],
     ["notlar", "Notlar & Yaklaşım", <StickyNote size={15} key="a" />],
     ["teskilat", "Teşkilat", <Network size={15} key="f" />],
+    ["yonetimler", "Yönetimler", <Users size={15} key="y" />],
+    ["secmen", "Seçmen Raporu", <ClipboardCheck size={15} key="s" />],
+    ["talepler", "Talepler", <StickyNote size={15} key="t" />],
     ["eksik", "Eksikler & Uyarılar", <AlertTriangle size={15} key="g" />],
   ];
   const [siteFiltre, setSiteFiltre] = useState("hepsi"); // hepsi | atanan | atanmayan
@@ -376,6 +521,126 @@ export default function BaskanRapor({ profil }) {
       })()}
 
       {/* ---- TEŞKİLAT ŞEMASI ---- */}
+      {tab === "secmen" && !mesgul && (() => {
+        if (secmenRapor === null) return <div className="merkez">Yükleniyor…</div>;
+        const renkler = [
+          { d: 5, ad: "Beyaz — AK Parti", bg: "#ffffff", kenar: "#cbd5e1" },
+          { d: 3, ad: "Gri — Kararsız seçmen", bg: "#9ca3af", kenar: "#6b7280" },
+          { d: 1, ad: "Siyah — Başka Parti", bg: "#1f2937", kenar: "#111827" },
+        ];
+        const q = (ara || "").toLocaleLowerCase("tr").trim();
+        let liste = (secmenRapor[renkSec] || []).filter((k) => !mahFiltre || k.mahalle_id === mahFiltre);
+        if (q) liste = liste.filter((k) => `${k.ad} ${k.soyad}`.toLocaleLowerCase("tr").includes(q));
+        return (
+          <div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              {renkler.map((r) => (
+                <button key={r.d} onClick={() => setRenkSec(r.d)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, border: renkSec === r.d ? "2px solid #0f172a" : "1px solid #e5eaf2", background: "#fff", cursor: "pointer", flex: "1 1 180px" }}>
+                  <span style={{ width: 16, height: 16, borderRadius: 4, background: r.bg, border: `1px solid ${r.kenar}` }} />
+                  <span style={{ fontWeight: 700, fontSize: 13, color: "#0f172a" }}>{r.ad}</span>
+                  <span style={{ marginLeft: "auto", fontWeight: 800, fontSize: 15, color: "#0f172a" }}>{fmt((secmenRapor[r.d] || []).length)}</span>
+                </button>
+              ))}
+            </div>
+            {(() => {
+              const barRenk = renkSec === 1 ? "#1f2937" : renkSec === 3 ? "#9ca3af" : "#16a34a";
+              const dag = {};
+              (secmenRapor[renkSec] || []).forEach((k) => { const m = mahAd[k.mahalle_id] || "—"; dag[m] = (dag[m] || 0) + 1; });
+              const bar = Object.entries(dag).map(([ad, adet]) => ({ ad: ad.length > 12 ? ad.slice(0, 11) + "…" : ad, tamAd: ad, adet })).sort((a, b) => b.adet - a.adet);
+              if (!bar.length) return null;
+              return (
+                <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "14px 16px", marginBottom: 14 }}>
+                  <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 10 }}>Mahalleye göre dağılım <span style={{ color: "#94a3b8", fontWeight: 400, fontSize: 12 }}>· tıkla → o mahalleye filtrele</span></div>
+                  <ResponsiveContainer width="100%" height={Math.max(160, bar.length * 32)}>
+                    <BarChart data={bar} layout="vertical" margin={{ top: 0, right: 16, left: 8, bottom: 0 }}>
+                      <XAxis type="number" tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <YAxis type="category" dataKey="ad" tick={{ fontSize: 11, fill: "#475569" }} axisLine={false} tickLine={false} width={100} />
+                      <Tooltip formatter={(v) => [fmt(v) + " kişi", ""]} labelFormatter={(l, pl) => pl?.[0]?.payload?.tamAd || l} />
+                      <Bar dataKey="adet" fill={barRenk} radius={[0, 4, 4, 0]} maxBarSize={22}
+                        onClick={(d) => { const mid = Object.keys(mahAd).find((k) => mahAd[k] === (d?.tamAd)); if (mid) setMahFiltre(mahFiltre === mid ? "" : mid); }}
+                        style={{ cursor: "pointer" }} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              );
+            })()}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, color: "#64748b" }}>{fmt(liste.length)} kişi{mahFiltre ? " · " + (mahAd[mahFiltre] || "") : ""}{q ? ` · "${ara}"` : ""}</div>
+              <button onClick={secmenDisaAktar} style={{ marginLeft: "auto", fontSize: 12.5, fontWeight: 700, color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}>⬇ Excel'e indir</button>
+            </div>
+            <div style={{ display: "grid", gap: 4 }}>
+              {liste.slice(0, 300).map((k, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13, padding: "6px 10px", background: "#fff", border: "1px solid #eef2f7", borderRadius: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600 }}>{k.ad} {k.soyad}{k.telefon ? <span style={{ color: "#94a3b8", fontWeight: 400, fontSize: 12 }}> · {k.telefon}</span> : null}</div>
+                    {(k.site || k.adres) && <div style={{ fontSize: 11.5, color: "#94a3b8" }}>{k.site && <span style={{ color: "#7c3aed", fontWeight: 600 }}>🏢 {k.site}</span>}{k.site && k.adres ? " · " : ""}{k.adres}</div>}
+                  </div>
+                  <span style={{ color: "#94a3b8", fontSize: 12, whiteSpace: "nowrap" }}>{mahAd[k.mahalle_id] || ""}</span>
+                </div>
+              ))}
+              {liste.length > 300 && <div style={{ fontSize: 12, color: "#94a3b8", padding: 8 }}>+{fmt(liste.length - 300)} kişi daha… (arama/mahalle filtresiyle daralt)</div>}
+              {liste.length === 0 && <div style={{ color: "#94a3b8", padding: 24, textAlign: "center" }}>Bu renkte kayıt yok.</div>}
+            </div>
+          </div>
+        );
+      })()}
+
+      {tab === "talepler" && <Talepler profil={profil} />}
+
+      {tab === "yonetimler" && !mesgul && (() => {
+        if (yonetimler === null) return <div className="merkez">Yükleniyor…</div>;
+        const q = (ara || "").toLocaleLowerCase("tr").trim();
+        let liste = yonetimler.filter((x) => !mahFiltre || x.mahalle_id === mahFiltre);
+        if (q) liste = liste.filter((x) => (x.kod || "").toLocaleLowerCase("tr").includes(q) || (x.baskan?.ad_soyad || "").toLocaleLowerCase("tr").includes(q) || x.uyeler.some((u) => (u.ad_soyad || "").toLocaleLowerCase("tr").includes(q)));
+        const byMah = {};
+        liste.forEach((x) => { const m = mahAd[x.mahalle_id] || "—"; (byMah[m] = byMah[m] || []).push(x); });
+        const mahlar = Object.keys(byMah).sort((a, b) => a.localeCompare(b, "tr"));
+        const tamSay = liste.filter((x) => x.uyeler.length >= 3).length;
+        const eksikSay = liste.filter((x) => x.atanmis && x.uyeler.length < 3).length;
+        const sorumsuz = liste.filter((x) => !x.atanmis).length;
+        return (
+          <div>
+            <div style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>
+              Toplam <b>{liste.length}</b> sokak grubu · <b style={{ color: "#16a34a" }}>{tamSay}</b> tam · <b style={{ color: "#ea580c" }}>{eksikSay}</b> eksik · <b style={{ color: "#dc2626" }}>{sorumsuz}</b> sorumlusuz
+            </div>
+            {mahlar.map((m) => (
+              <div key={m} style={{ marginBottom: 18 }}>
+                <div style={{ fontWeight: 800, fontSize: 14, color: "#0f172a", marginBottom: 8 }}>{m} <span style={{ color: "#94a3b8", fontWeight: 400, fontSize: 12 }}>({byMah[m].length})</span></div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 10 }}>
+                  {byMah[m].map((x) => {
+                    const tam = x.uyeler.length >= 3;
+                    const renk = !x.atanmis ? "#dc2626" : (tam ? "#16a34a" : "#ea580c");
+                    const metin = !x.atanmis ? "Sorumlusuz" : (tam ? "Tam" : "Eksik");
+                    return (
+                      <div key={x.id} style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "12px 14px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                          <b style={{ fontSize: 13.5 }}>{x.kod}</b>
+                          <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 700, color: "#fff", background: renk, padding: "1px 9px", borderRadius: 999 }}>{metin} · {x.uyeler.length}/3 üye</span>
+                        </div>
+                        {x.baskan ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 5 }}>
+                            <span style={{ fontSize: 10, fontWeight: 800, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", padding: "1px 6px", borderRadius: 999 }}>👑</span>
+                            <b>{x.baskan.ad_soyad}</b>{x.baskan.telefon && <span style={{ color: "#64748b", fontSize: 12 }}>· {x.baskan.telefon}</span>}
+                          </div>
+                        ) : <div style={{ fontSize: 12.5, color: "#dc2626", marginBottom: 5 }}>Sorumlu atanmamış</div>}
+                        {x.uyeler.map((u, i) => (
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, marginBottom: 3, color: "#334155" }}>
+                            <span style={{ fontSize: 9.5, fontWeight: 700, background: "#eef2ff", color: "#3730a3", padding: "1px 6px", borderRadius: 999 }}>ÜYE</span>
+                            {u.ad_soyad}{u.telefon && <span style={{ color: "#94a3b8", fontSize: 11 }}>· {u.telefon}</span>}
+                          </div>
+                        ))}
+                        {x.atanmis && x.uyeler.length < 3 && <div style={{ fontSize: 11.5, color: "#ea580c", marginTop: 4 }}>{3 - x.uyeler.length} üye daha gerekli</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            {liste.length === 0 && <div style={{ color: "#94a3b8", padding: 24, textAlign: "center" }}>Kayıt yok.</div>}
+          </div>
+        );
+      })()}
+
       {tab === "teskilat" && !mesgul && (() => {
         const bas = (ad) => String(ad || "").trim().split(/\s+/).map((p) => p[0] || "").join("").slice(0, 2).toLocaleUpperCase("tr");
         const kisiSatir = (kisi, gorev) => {
@@ -393,26 +658,91 @@ export default function BaskanRapor({ profil }) {
         };
         return (
           <div>
-            <div style={{ background: "#0b2a5b", color: "#fff", borderRadius: 12, padding: "14px 18px", marginBottom: 14, textAlign: "center" }}>
-              <div style={{ fontSize: 12, color: "#cadcfc", marginBottom: 3 }}>Başakşehir İlçe Başkanı</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>{ILCE_BASKANI?.ad || "—"}</div>
+            <div style={{ background: "#0b2a5b", color: "#fff", borderRadius: 12, padding: "14px 18px", marginBottom: 14, textAlign: "center", position: "relative" }}>
+              <div style={{ fontSize: 12, color: "#cadcfc", marginBottom: 3 }}>İlçe Başkanı</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>{ilceBaskan?.ad_soyad || "—"}</div>
+              {ilceBaskan?.telefon && <div style={{ fontSize: 12, color: "#cadcfc", marginTop: 2 }}>{ilceBaskan.telefon}</div>}
+              {ilYonetici && <button onClick={() => setIbForm({ ad: ilceBaskan?.ad_soyad || "", tel: ilceBaskan?.telefon || "", hesap: false })} style={{ position: "absolute", top: 12, right: 12, fontSize: 11.5, fontWeight: 700, background: "rgba(255,255,255,0.15)", color: "#fff", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}>Düzenle</button>}
+            </div>
+            <div style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "12px 14px", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+                <b style={{ fontSize: 14 }}>İl Sorumluları</b>
+                {ilYonetici && <button onClick={() => setIlSorForm({ ad: "", gorev: "", tel: "" })} style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 700, color: "#2563eb", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}>+ Ekle</button>}
+              </div>
+              {ilSorumlular.length === 0 && <div className="dim" style={{ fontSize: 13, marginBottom: 6 }}>İl sorumlusu eklenmemiş.</div>}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 8 }}>
+                {ilSorumlular.map((r) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#f8fafc", border: "1px solid #eef2f7", borderRadius: 9, padding: "8px 10px" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>{r.ad_soyad}</div>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>{r.gorev_metin}{r.telefon ? " · " + r.telefon : ""}</div>
+                    </div>
+                    {ilYonetici && <button onClick={() => ilSorumluSil(r)} style={{ marginLeft: "auto", color: "#dc2626", background: "none", border: "none", cursor: "pointer", fontSize: 12 }}>Sil</button>}
+                  </div>
+                ))}
+              </div>
+              {ilYonetici && ilSorForm && (
+                <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  <input placeholder="Ad Soyad" value={ilSorForm.ad} onChange={(e) => setIlSorForm((s) => ({ ...s, ad: e.target.value }))} style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, flex: 1, minWidth: 140 }} />
+                  <input placeholder="Görev (Sorumlu İl YK Üyesi…)" value={ilSorForm.gorev} onChange={(e) => setIlSorForm((s) => ({ ...s, gorev: e.target.value }))} style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, flex: 1, minWidth: 180 }} />
+                  <input placeholder="Telefon" value={ilSorForm.tel} onChange={(e) => setIlSorForm((s) => ({ ...s, tel: e.target.value }))} style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, width: 120 }} />
+                  <button onClick={ilSorumluEkle} style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Ekle</button>
+                  <button onClick={() => setIlSorForm(null)} style={{ padding: "8px 12px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>İptal</button>
+                </div>
+              )}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
-              {Object.entries(MAHALLE_TESKILAT).map(([mahAdi, t]) => (
-                <div key={mahAdi} style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "12px 14px" }}>
-                  <div style={{ fontWeight: 800, fontSize: 14, color: "#0f172a", marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #eef2f7" }}>{mahAdi}</div>
+              {(teskilatMah || []).map((t) => (
+                <div key={t.mahalle_id} style={{ background: "#fff", border: "1px solid #e5eaf2", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 8, borderBottom: "1px solid #eef2f7" }}>
+                    <div style={{ fontWeight: 800, fontSize: 14, color: "#0f172a" }}>{t.ad}</div>
+                    {yonetici && <button onClick={() => setDuzenleMah({ mahalle_id: t.mahalle_id, ad: t.ad })} style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 700, color: "#c2410c", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 7, padding: "3px 10px", cursor: "pointer" }}>Düzenle</button>}
+                  </div>
                   <div style={{ display: "grid", gap: 9 }}>
                     {kisiSatir(t.baskan, "Mahalle Başkanı")}
                     {kisiSatir(t.yurutme, "İlçe Yürütme Kurulu Üyesi")}
                     {(t.yk && t.yk.length ? t.yk : [null]).map((p, i) => <div key={"y" + i}>{kisiSatir(p, "İlçe Yönetim Kurulu Üyesi")}</div>)}
                     {(t.meclis && t.meclis.length ? t.meclis : [null]).map((p, i) => <div key={"m" + i}>{kisiSatir(p, "Belediye Meclis Üyesi")}</div>)}
+                    {t.bby ? <div>{kisiSatir(t.bby, "Belediye Başkan Yardımcısı")}</div> : null}
                   </div>
                 </div>
               ))}
+              {yonetici && (
+                <div style={{ background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <button onClick={() => setDuzenleMah({ mahalle_id: "", ad: "" })} style={{ fontSize: 13, fontWeight: 700, color: "#2563eb", background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>+ Mahalle teşkilatı ekle/düzenle</button>
+                </div>
+              )}
             </div>
           </div>
         );
       })()}
+
+      {ibForm && (
+        <div onClick={() => setIbForm(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, background: "#fff", borderRadius: 14, padding: 18 }}>
+            <h3 style={{ margin: "0 0 12px" }}>İlçe Başkanı</h3>
+            <input placeholder="Ad Soyad" value={ibForm.ad} onChange={(e) => setIbForm({ ...ibForm, ad: e.target.value })} style={{ width: "100%", padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 8, marginBottom: 10, boxSizing: "border-box" }} />
+            <input placeholder="Telefon" value={ibForm.tel} onChange={(e) => setIbForm({ ...ibForm, tel: e.target.value })} style={{ width: "100%", padding: "10px 12px", border: "1px solid #d1d5db", borderRadius: 8, marginBottom: 10, boxSizing: "border-box" }} />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginBottom: 14 }}>
+              <input type="checkbox" checked={ibForm.hesap} onChange={(e) => setIbForm({ ...ibForm, hesap: e.target.checked })} /> giriş hesabı aç (ilçe yönetimi)
+            </label>
+            {ibForm.sonuc && <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 8, padding: 10, fontSize: 13, marginBottom: 12 }}><b style={{ color: "#065f46" }}>Hesap açıldı:</b><div style={{ fontFamily: "monospace", marginTop: 4 }}>{ibForm.sonuc.eposta}</div><div style={{ fontFamily: "monospace" }}>{ibForm.sonuc.sifre}</div></div>}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setIbForm(null)} style={{ flex: 1, padding: 10, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", cursor: "pointer" }}>Kapat</button>
+              <button onClick={ilceBaskanKaydet} disabled={ibForm.mesgul} style={{ flex: 1, padding: 10, border: "none", borderRadius: 8, background: "#2563eb", color: "#fff", fontWeight: 600, cursor: "pointer" }}>{ibForm.mesgul ? "Kaydediliyor…" : "Kaydet"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {duzenleMah && (
+        <div onClick={() => setDuzenleMah(null)} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 20, overflowY: "auto" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 720, background: "#fff", borderRadius: 14, marginTop: 20, overflow: "hidden" }}>
+            <TeskilatYonetim session={null} sabitMahId={duzenleMah.mahalle_id || undefined}
+              onKapat={() => setDuzenleMah(null)} onDegisti={teskilatYukle} />
+          </div>
+        </div>
+      )}
 
       {/* ---- EKSİKLER & UYARILAR ---- */}
       {tab === "eksik" && !mesgul && (() => {
@@ -553,6 +883,49 @@ export default function BaskanRapor({ profil }) {
                   {bosGorevMah.map((m) => <span key={m.mahalle_id} style={{ background: "#cffafe", color: "#155e75", padding: "3px 10px", borderRadius: 999, fontWeight: 600 }}>{m.ad}</span>)}
                 </div>
               ) : <div style={{ fontSize: 13, color: "#16a34a" }}>Her mahallede üye/ziyaret aktivitesi var ✓</div>)}
+
+            {(() => {
+              const sok = (sokakSor || []).filter((x) => !mahFiltre || x.mahalle_id === mahFiltre);
+              const sokAtanan = sok.filter((x) => x.atanmis);
+              const sokAtanmayan = sok.filter((x) => !x.atanmis);
+              const sokEkipTam = sokAtanan.filter((x) => x.uye >= 3);   // başkan hariç ≥3 üye
+              const sokYonetimEksik = sokAtanan.filter((x) => x.uye < 3);
+              return (
+                <>
+                  <div style={{ fontWeight: 800, fontSize: 15, color: "#0f172a", margin: "22px 0 10px" }}>Sokak Sorumluları</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12, marginBottom: 14 }}>
+                    {donut("Sokak Sorumlusu Atama", sokAtanan.length, sokAtanmayan.length, "#dc2626")}
+                    {donut("Sokak Yönetimi (başkan hariç 3 üye) Kurulumu", sokEkipTam.length, sokYonetimEksik.length, "#ea580c")}
+                  </div>
+                  {kutu("#dc2626", <UserCheck size={15} />, "Sokak Sorumlusu Atanmamış Sokaklar", sokAtanmayan.length,
+                    sokAtanmayan.length ? (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        {sokAtanmayan.slice(0, 60).map((x, i) => (
+                          <div key={x.id} style={{ fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10, padding: "5px 0", borderTop: i ? "1px solid #f8fafc" : "none" }}>
+                            <span style={{ fontWeight: 600 }}>{x.kod}</span>
+                            <span style={{ color: "#94a3b8", fontSize: 12 }}>{mahAd[x.mahalle_id] || ""}</span>
+                          </div>
+                        ))}
+                        {sokAtanmayan.length > 60 && <div style={{ fontSize: 12, color: "#94a3b8" }}>+{sokAtanmayan.length - 60} sokak daha…</div>}
+                      </div>
+                    ) : <div style={{ fontSize: 13, color: "#16a34a" }}>Tüm sokaklara sorumlu atanmış ✓</div>)}
+                  {kutu("#ea580c", <Users size={15} />, "Yönetimi Kurulmamış Sokaklar (başkan hariç 3 üye)", sokYonetimEksik.length,
+                    sokYonetimEksik.length ? (
+                      <div style={{ display: "grid", gap: 6 }}>
+                        {sokYonetimEksik.slice(0, 60).map((x, i) => (
+                          <EkipRozet key={x.id} grupId={x.id} cocuk={
+                            <div style={{ fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10, padding: "5px 0", borderTop: i ? "1px solid #f8fafc" : "none", cursor: "pointer", width: "100%" }}>
+                              <span style={{ fontWeight: 600 }}>{x.kod}<span style={{ color: "#94a3b8", fontWeight: 400, fontSize: 12 }}> · {mahAd[x.mahalle_id] || ""}{x.sorumlu ? " · " + x.sorumlu : ""}</span></span>
+                              <span style={{ color: "#ea580c", fontWeight: 700 }}>{x.uye}/3 üye</span>
+                            </div>
+                          } />
+                        ))}
+                        {sokYonetimEksik.length > 60 && <div style={{ fontSize: 12, color: "#94a3b8" }}>+{sokYonetimEksik.length - 60} sokak daha…</div>}
+                      </div>
+                    ) : <div style={{ fontSize: 13, color: "#16a34a" }}>Atanan tüm sokaklarda ekip kurulmuş ✓</div>)}
+                </>
+              );
+            })()}
           </div>
         );
       })()}

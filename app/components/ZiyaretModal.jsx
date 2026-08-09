@@ -11,6 +11,30 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
   const [yaklasim, setYaklasim] = useState(hane.yaklasim || 0);
   const [kapsam, setKapsam] = useState(hane.kapsam || "");
   const [not_, setNot] = useState(hane.not_ || "");
+  const [talepAcik, setTalepAcik] = useState(false);
+  const [talep, setTalep] = useState({ kisi_id: "", ad_soyad: "", telefon: "", kategori: "", baslik: "", aciklama: "", oncelik: "normal" });
+  const [talepMesaj, setTalepMesaj] = useState("");
+  const [talepMesgul, setTalepMesgul] = useState(false);
+  async function talepKaydet() {
+    if (!talep.baslik.trim()) { setTalepMesaj("Başlık gerekli."); return; }
+    setTalepMesgul(true); setTalepMesaj("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const kisi = (hane.kisiler || []).find((k) => k.id === talep.kisi_id);
+      const sahip = talep.kisi_id ? `${kisi?.ad || ""} ${kisi?.soyad || ""}`.trim() : talep.ad_soyad.trim();
+      const { data: t, error } = await supabase.from("talep").insert({
+        hane_id: hane.id, kisi_id: talep.kisi_id || null,
+        kategori: talep.kategori.trim() || null, baslik: talep.baslik.trim(), aciklama: talep.aciklama.trim() || null,
+        durum: "yeni", oncelik: talep.oncelik, ad_soyad: sahip || null, telefon: (talep.telefon || kisi?.telefon || "").trim() || null,
+        olusturan_id: session?.user?.id || null,
+      }).select("id").single();
+      if (error) throw error;
+      await supabase.from("talep_log").insert({ talep_id: t.id, durum: "yeni", not_: "Talep oluşturuldu", kullanici_id: session?.user?.id || null });
+      setTalep({ kisi_id: "", ad_soyad: "", telefon: "", kategori: "", baslik: "", aciklama: "", oncelik: "normal" });
+      setTalepAcik(false); setTalepMesaj("Talep kaydedildi ✓");
+    } catch (e) { setTalepMesaj("Kaydedilemedi: " + (e?.message || e)); }
+    setTalepMesgul(false);
+  }
   const [gecmis, setGecmis] = useState(null);
   const [kisiMap, setKisiMap] = useState({}); // kullanici_id -> profil (ad_soyad, rol)
   useEffect(() => {
@@ -114,7 +138,39 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
         </datalist>
 
         <label style={{ fontSize: 12, fontWeight: 700, color: "#475569" }}>NOT</label>
-        <textarea value={not_} onChange={(e) => setNot(e.target.value)} rows={3} placeholder="Ziyaret notu…" style={{ width: "100%", margin: "7px 0 16px", padding: 10, border: "1px solid #d1d5db", borderRadius: 9, fontSize: 14, fontFamily: "inherit", resize: "vertical" }} />
+        <textarea value={not_} onChange={(e) => setNot(e.target.value)} rows={3} placeholder="Ziyaret notu…" style={{ width: "100%", margin: "7px 0 12px", padding: 10, border: "1px solid #d1d5db", borderRadius: 9, fontSize: 14, fontFamily: "inherit", resize: "vertical" }} />
+
+        {/* TALEP EKLE */}
+        <div style={{ border: "1px solid #e5eaf2", borderRadius: 10, padding: "10px 12px", marginBottom: 14, background: "#fafbfc" }}>
+          <button type="button" onClick={() => setTalepAcik((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "none", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 700, color: "#166534", padding: 0 }}>
+            📋 Talep ekle {talepAcik ? "▲" : "▼"}
+            {talepMesaj && !talepAcik && <span style={{ marginLeft: "auto", fontSize: 12, fontWeight: 400, color: talepMesaj.includes("✓") ? "#16a34a" : "#dc2626" }}>{talepMesaj}</span>}
+          </button>
+          {talepAcik && (
+            <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+              <select value={talep.kisi_id} onChange={(e) => setTalep((s2) => ({ ...s2, kisi_id: e.target.value }))} style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13 }}>
+                <option value="">Talep sahibi seç (haneden) — ya da elle yaz</option>
+                {(hane.kisiler || []).map((k) => <option key={k.id} value={k.id}>{k.ad} {k.soyad}</option>)}
+              </select>
+              {!talep.kisi_id && (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input value={talep.ad_soyad} onChange={(e) => setTalep((s2) => ({ ...s2, ad_soyad: e.target.value }))} placeholder="Ad Soyad (elle)" style={{ flex: 2, padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13 }} />
+                  <input value={talep.telefon} onChange={(e) => setTalep((s2) => ({ ...s2, telefon: e.target.value }))} placeholder="Telefon" style={{ flex: 1, padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13 }} />
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <input value={talep.kategori} onChange={(e) => setTalep((s2) => ({ ...s2, kategori: e.target.value }))} placeholder="Kategori (Altyapı, Sosyal Yardım…)" style={{ flex: 1, padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13 }} />
+                <select value={talep.oncelik} onChange={(e) => setTalep((s2) => ({ ...s2, oncelik: e.target.value }))} style={{ width: 120, padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13 }}>
+                  <option value="dusuk">Düşük</option><option value="normal">Normal</option><option value="yuksek">Yüksek</option>
+                </select>
+              </div>
+              <input value={talep.baslik} onChange={(e) => setTalep((s2) => ({ ...s2, baslik: e.target.value }))} placeholder="Talep başlığı *" style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13 }} />
+              <textarea value={talep.aciklama} onChange={(e) => setTalep((s2) => ({ ...s2, aciklama: e.target.value }))} rows={2} placeholder="Açıklama" style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13, fontFamily: "inherit", resize: "vertical" }} />
+              {talepMesaj && <div style={{ fontSize: 12, color: talepMesaj.includes("✓") ? "#16a34a" : "#dc2626" }}>{talepMesaj}</div>}
+              <button type="button" onClick={talepKaydet} disabled={talepMesgul} style={{ padding: "8px", background: "#166534", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{talepMesgul ? "Kaydediliyor…" : "Talebi kaydet"}</button>
+            </div>
+          )}
+        </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
           {hane.ziyaret && <button onClick={() => onSifirla(hane)} disabled={mesgul} style={{ padding: "9px 14px", background: "#fff", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: "pointer", marginRight: "auto" }}>Sıfırla (bekliyora al)</button>}

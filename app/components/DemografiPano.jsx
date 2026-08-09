@@ -44,6 +44,27 @@ export default function DemografiPano({ stat, ekstra, mahalleIds, baslik = "", c
   useEffect(() => { setHazir(true); }, []);
 
   const idKey = (mahalleIds || []).filter(Boolean).join(",");
+  // Teskilat artik DB'den (teskilat tablosu) — statik MAHALLE_TESKILAT yerine
+  const [teskilatDb, setTeskilatDb] = useState(null);
+  const mahId = (mahalleIds || []).filter(Boolean)[0] || null;
+  useEffect(() => {
+    if (!mahId) { setTeskilatDb(null); return; }
+    (async () => {
+      const { data } = await supabase.from("teskilat")
+        .select("unvan, ad_soyad, telefon, kadin, sira").eq("mahalle_id", mahId).order("sira");
+      if (!data || !data.length) { setTeskilatDb(null); return; }
+      const t = { baskan: null, yurutme: null, yk: [], meclis: [], bby: null };
+      data.forEach((r) => {
+        const k = { ad: r.ad_soyad, tel: r.telefon || "", k: !!r.kadin };
+        if (r.unvan === "baskan") t.baskan = k;
+        else if (r.unvan === "yurutme") t.yurutme = k;
+        else if (r.unvan === "yk") t.yk.push(k);
+        else if (r.unvan === "meclis") t.meclis.push(k);
+        else if (r.unvan === "bby") t.bby = k;
+      });
+      setTeskilatDb(t);
+    })();
+  }, [mahId]);
   // Cinsiyete göre ortalama yaş — tek sorgu + önbellek (anında)
   const [cinsYas, setCinsYas] = useState(null);
   useEffect(() => {
@@ -252,7 +273,7 @@ export default function DemografiPano({ stat, ekstra, mahalleIds, baslik = "", c
       {(() => {
         // Mahalle teşkilatı — telefonlu, kadın pembe/erkek mavi
         const mahAd = String(baslik || "").replace(/\s*Mahallesi\s*$/i, "").trim();
-        const t = MAHALLE_TESKILAT[mahAd];
+        const t = teskilatDb;  // DB tablosundan
         if (!t) return null;
         const bas = (ad) => String(ad || "").trim().split(/\s+/).map((p) => p[0] || "").join("").slice(0, 2).toLocaleUpperCase("tr");
         const satir = (kisi, gorev, vurgu) => {

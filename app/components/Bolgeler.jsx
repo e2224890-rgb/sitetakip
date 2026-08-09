@@ -181,7 +181,7 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
       <div className="panel" style={{ marginTop: 15 }}><div className="cards">
         {liste.map((b) => {
           const gs = (grupMap[b.id] || []).filter((g) => (g.hane || 0) > 0 || (g.kisi || 0) > 0);
-          if (gs.length) {
+          if (gs.length > 1) {
             return gs.map((g) => (
               <div key={g.id} className="card" onClick={() => onSecGrup && onSecGrup(b, g)}>
                 <div className="card-t">{b.kod}-{g.no} <ChevronRight size={15} /></div>

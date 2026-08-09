@@ -31,35 +31,17 @@ export async function POST(req) {
     if (!caller) return Response.json({ error: "Bu işlem için yetkiniz yok." }, { status: 403 });
 
     const { ad_soyad, eposta, sifre, rol, telefon, meslek, tc_no, ilce_id, site_kayit_id, blok,
-            mahalle_id, grup_id, kisi_id, gorev, sifre_gecici, benzersizEposta } = await req.json();
+            mahalle_id, grup_id, kisi_id, gorev, sifre_gecici } = await req.json();
     if (!eposta || !sifre) return Response.json({ error: "E-posta ve şifre gerekli." }, { status: 400 });
     if (String(sifre).length < 6) return Response.json({ error: "Şifre en az 6 karakter olmalı." }, { status: 400 });
 
     let uid;
-    let epostaKullanilan = eposta;
-    if (benzersizEposta) {
-      // ad.soyad@... çakışırsa ad.soyad1@, ad.soyad2@ ... dener
-      const at = eposta.indexOf("@");
-      const yerel = at >= 0 ? eposta.slice(0, at) : eposta;
-      const alan = at >= 0 ? eposta.slice(at) : "@akpartibasaksehir.com";
-      let n = 0, ok = false;
-      while (n <= 50) {
-        const deneme = n === 0 ? `${yerel}${alan}` : `${yerel}${n}${alan}`;
-        const { data: cr, error: e2 } = await a.auth.admin.createUser({ email: deneme, password: sifre, email_confirm: true });
-        if (!e2) { uid = cr.user.id; epostaKullanilan = deneme; ok = true; break; }
-        const m = (e2.message || "").toLowerCase();
-        if (m.includes("already") || m.includes("registered") || m.includes("exists") || e2.code === "email_exists") { n++; continue; }
-        return Response.json({ error: e2.message }, { status: 400 });
-      }
-      if (!ok) return Response.json({ error: "Uygun benzersiz e-posta bulunamadı." }, { status: 400 });
-    } else {
-      const { data: created, error: eC } = await a.auth.admin.createUser({ email: eposta, password: sifre, email_confirm: true });
-      if (eC) {
-        const { data: list } = await a.auth.admin.listUsers();
-        uid = list?.users?.find((x) => x.email === eposta)?.id;
-        if (!uid) return Response.json({ error: eC.message }, { status: 400 });
-      } else uid = created.user.id;
-    }
+    const { data: created, error: eC } = await a.auth.admin.createUser({ email: eposta, password: sifre, email_confirm: true });
+    if (eC) {
+      const { data: list } = await a.auth.admin.listUsers();
+      uid = list?.users?.find((x) => x.email === eposta)?.id;
+      if (!uid) return Response.json({ error: eC.message }, { status: 400 });
+    } else uid = created.user.id;
 
     // Rol yetkilendirme: yönetim her rolü açabilir; sorumlu/koordinatör YALNIZCA grup_baskani (ekip üyesi) açabilir
     const isAdmin = ADMIN_ROLLER.includes(caller.rol);
@@ -104,14 +86,9 @@ export async function POST(req) {
         : (await a.from("sokak_ekip").insert(satir)).error;
       if (ekErr) return Response.json({ error: "Hesap açıldı ama ekibe bağlanamadı: " + ekErr.message, id: uid }, { status: 400 });
       // başkansa eski gösterim alanını da güncelle (baskan_id artık gerçek profil → GrupBaskaniGorunum da çalışır)
-      if (rolGorev === "baskan") {
-        await a.from("sokak_grup").update({ baskan_id: uid, baskan_ad: ad_soyad || null }).eq("id", grup_id);
-        // Bölge seviyesindeki gösterim de aynı kişiyi göstersin (tek kaynak)
-        const { data: g } = await a.from("sokak_grup").select("bolge_id").eq("id", grup_id).single();
-        if (g?.bolge_id) await a.from("bolge").update({ sorumlu_id: uid }).eq("id", g.bolge_id);
-      }
+      if (rolGorev === "baskan") await a.from("sokak_grup").update({ baskan_id: uid, baskan_ad: ad_soyad || null }).eq("id", grup_id);
     }
-    return Response.json({ ok: true, id: uid, eposta: epostaKullanilan });
+    return Response.json({ ok: true, id: uid });
   } catch (e) {
     return Response.json({ error: String(e?.message || e) }, { status: 500 });
   }
