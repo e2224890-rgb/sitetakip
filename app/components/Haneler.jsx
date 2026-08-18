@@ -6,6 +6,7 @@ import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveCo
 import { NUF_RENK, csvIndir, fmt, haneBaslik, oran, sokakAdres, yakRenk } from "../../lib/format";
 import { yaklasimBilgi, YAKLASIM_LISTE } from "../../lib/constants";
 import { cacheOku, cacheYaz } from "../../lib/cache";
+import { tumSatirlar } from "../../lib/sayfali";
 import GrupBaskanPanel from "./GrupBaskanPanel";
 import EkipRozet from "./EkipRozet";
 import SokakBolStrip from "./SokakBolStrip";
@@ -128,8 +129,10 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
   async function parcaliKisi(table, sel, haneIds) {
     const chunks = [];
     for (let i = 0; i < haneIds.length; i += 200) chunks.push(haneIds.slice(i, i + 200));
-    const res = await Promise.all(chunks.map((c) => supabase.from(table).select(sel).in("hane_id", c)));
-    return res.flatMap((r) => r.data || []);
+    // 200 hanelik bir parça bile 1000 satırı aşabilir (5+ kişi/hane) -> her parça sayfalı çekilir.
+    const res = await Promise.all(chunks.map((c) => tumSatirlar((bas, son) =>
+      supabase.from(table).select(sel, { count: "exact" }).in("hane_id", c).order("id").range(bas, son))));
+    return res.flat();
   }
 
   async function yukle() {
@@ -138,10 +141,14 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
     const snap = cacheOku(haneCacheKey);
     if (snap && snap.length) setHaneler(snap); else setHaneler(null);
     try {
-      const hq = supabase.from("hane").select("id, no, adres, kapi_no, kapi_blok, blok_ad, ilce_id, grup_id").order("no");
-      const _hr = await (isSite ? hq.eq("site_kayit_id", birim.id) : hq.eq("bolge_id", birim.id).is("site_kayit_id", null));
-      if (_hr.error) throw _hr.error;
-      let hRows = _hr.data || [];
+      // .order("no").order("id"): "no" tek başına benzersiz değil; sayfalar arasında
+      // satır tekrarı/kaybı olmaması için id ile eşitlik bozulur.
+      let hRows = await tumSatirlar((bas, son) => {
+        const q = supabase.from("hane")
+          .select("id, no, adres, kapi_no, kapi_blok, blok_ad, ilce_id, grup_id", { count: "exact" })
+          .order("no").order("id").range(bas, son);
+        return isSite ? q.eq("site_kayit_id", birim.id) : q.eq("bolge_id", birim.id).is("site_kayit_id", null);
+      });
       if (haneIds) { const allow = new Set(haneIds); hRows = hRows.filter((h) => allow.has(h.id)); }
       const ids = (hRows || []).map((h) => h.id);
       let kRows = [], zRows = [], meta = null;
@@ -154,11 +161,15 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
         kRows = k; zRows = z; meta = m.data;
       } else {
         const [k, z, m] = await Promise.all([
-          supabase.from("kisi").select("id, ad, soyad, cinsiyet, telefon, uye, secmen, dogum_yili, hane_id, nufus_il").eq("bolge_id", birim.id),
-          supabase.from("ziyaret").select("hane_id, durum, not_, tarih, onceki_tarih, yaklasim, kapsam").eq("bolge_id", birim.id),
+          tumSatirlar((bas, son) => supabase.from("kisi")
+            .select("id, ad, soyad, cinsiyet, telefon, uye, secmen, dogum_yili, hane_id, nufus_il", { count: "exact" })
+            .eq("bolge_id", birim.id).order("id").range(bas, son)),
+          tumSatirlar((bas, son) => supabase.from("ziyaret")
+            .select("hane_id, durum, not_, tarih, onceki_tarih, yaklasim, kapsam", { count: "exact" })
+            .eq("bolge_id", birim.id).order("id").range(bas, son)),
           supabase.from("bolge").select("hedef_tarih").eq("id", birim.id).single(),
         ]);
-        kRows = k.data || []; zRows = z.data || []; meta = m.data;
+        kRows = k; zRows = z; meta = m.data;
       }
       setHedefTarih(meta?.hedef_tarih || "");
       const kBy = {}; (kRows || []).forEach((k) => { (kBy[k.hane_id] ||= []).push(k); });

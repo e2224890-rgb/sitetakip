@@ -4,6 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { ChevronRight, Search, UserCheck, Building2, Users } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { fmt, oran } from "../../lib/format";
+import { tumSatirlar } from "../../lib/sayfali";
 import BlokSorumlulari from "./BlokSorumlulari";
 import SiteYonetimListe from "./SiteYonetimListe";
 import Haneler from "./Haneler";
@@ -83,7 +84,9 @@ export default function Siteler({ profil, sabitMahalle }) {
 
   async function siteSec(s, tab = "atama") {
     setSecSite(s); setSiteTab(tab); setSecSokak(null); setKapilar([]); setSecKey(new Set()); setMesaj(""); setSiteHane(null);
-    const { data } = await supabase.from("hane").select("no, kisi(ad,soyad,uye)").eq("site_kayit_id", s.id).limit(500);
+    // 500'lük sabit limit büyük sitelerde listeyi sessizce kesiyordu -> tamamı sayfalı çekilir.
+    const data = await tumSatirlar((bas, son) => supabase.from("hane")
+      .select("no, kisi(ad,soyad,uye)", { count: "exact" }).eq("site_kayit_id", s.id).order("id").range(bas, son));
     setSiteHane(data || []);
   }
 
