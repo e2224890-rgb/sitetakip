@@ -1,0 +1,11 @@
+# bağımlılıklar / derleme
+node_modules
+.next
+
+# ortam değişkenleri — SUPABASE_SERVICE_ROLE burada, asla commit'lenmez
+.env
+.env.local
+.env*.local
+
+# kişisel araç ayarları
+.claude/settings.local.json
