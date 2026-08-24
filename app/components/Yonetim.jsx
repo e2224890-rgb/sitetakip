@@ -1,12 +1,14 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../lib/supabase";
+import { cikisYap } from "../../lib/oturum";
 import { LayoutDashboard, Building2, Compass, Users, ShieldCheck, BadgeCheck, Boxes, FileText, ChevronRight, LogOut, Map, MapPin, Menu, ClipboardList } from "lucide-react";
 import Bolgeler from "./Bolgeler";
 import Gezgin from "./Gezgin";
 import GrupDetay from "./GrupDetay";
 import Haneler from "./Haneler";
 import IlGeneli from "./IlGeneli";
+import IlceHaritasi from "./IlceHaritasi";
 import Siteler from "./Siteler";
 import SitelerSkorboard from "./SitelerSkorboard";
 import Sorumlular from "./Sorumlular";
@@ -153,7 +155,7 @@ export default function Yonetim({ session, profil }) {
           <div className="who"><div className="av"><ShieldCheck size={16} /></div>
             <div><div className="who-n">{profil.ad_soyad || "İl Başkanlığı"}</div>
               <div className="who-e">{session.user.email}</div></div></div>
-          <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış Yap</button>
+          <button className="btn cikis" onClick={() => cikisYap()}><LogOut size={14} /> Çıkış Yap</button>
         </div>
       </aside>
 
@@ -179,6 +181,18 @@ export default function Yonetim({ session, profil }) {
               {secBolge && <><ChevronRight size={14} />{secGrup ? <a onClick={() => setSecGrup(null)}>{secBolge.kod}</a> : <span className="cur">{secBolge.kod}</span>}</>}
               {secBolge && secGrup && <><ChevronRight size={14} /><span className="cur">{secBolge.kod}-{secGrup.no}</span></>}
             </div>
+            {!secMahalle && (
+              <IlceHaritasi ilceId={secIlceId} ilceAd={secIlce.ad}
+                onMahalleSec={(mahalleId, ad) => {
+                  // Gezgin kartlarıyla AYNI şekil gönderilmeli: aşağıdaki ekranlar
+                  // secMahalle.id okuyor, mv_mahalle_ozet satırında ise alan adı
+                  // mahalle_id. Satırı olduğu gibi geçirmek id'yi undefined bırakır
+                  // ve Siteler/Bölgeler boş gelir.
+                  const m = (ilceMahalleler || []).find((x) => x.mahalle_id === mahalleId);
+                  setSecMahalle({ id: mahalleId, ad: m?.ad || ad, tip: m?.tip });
+                  setSecBolge(null); setSecGrup(null);
+                }} />
+            )}
             {!secMahalle && <Gezgin mahalleler={ilceMahalleler} toplam={toplam} bolgeToplam={bolgeToplam} ilceAd={secIlce.ad}
               onSec={(m) => { setSecMahalle(m); setSecBolge(null); setSecGrup(null); }} />}
             {secMahalle && !secBolge && secMahalle.tip === "site" && mahalleBolgeSay > 0 && (
