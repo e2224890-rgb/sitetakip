@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
+import { cikisYap } from "../../lib/oturum";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ChevronRight, LogOut, UserCheck, Crown, Building2, Map } from "lucide-react";
 const Haneler = dynamic(() => import("./Haneler"), { ssr: false, loading: () => <div className="merkez">Yükleniyor…</div> });
@@ -65,7 +66,7 @@ export default function SahaGorunum({ session, profil, alan, baslik }) {
         <div className="brand"><div className="logo"><Crown size={18} /></div>
           <div><div className="brand-t">{unvan} Paneli</div>
             <div className="brand-s">{profil.ad_soyad || session.user.email}</div></div></div>
-        <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış</button>
+        <button className="btn cikis" onClick={() => cikisYap()}><LogOut size={14} /> Çıkış</button>
       </header>
       <main className="main">
         <div className="page">

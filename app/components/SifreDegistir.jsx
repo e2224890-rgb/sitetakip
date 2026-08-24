@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
 import { supabase } from "../../lib/supabase";
+import { cikisYap } from "../../lib/oturum";
+import { hataOnekli } from "../../lib/hata";
 
 /* İlk girişte zorunlu şifre değiştirme.
    RolDagitici: profil.sifre_gecici === true ise rol dağıtımından ÖNCE bunu gösterir. */
@@ -16,9 +18,17 @@ export default function SifreDegistir({ session, onBitti }) {
     if (s1 !== s2) { setHata("Şifreler eşleşmiyor."); return; }
     setMesgul(true);
     const { error } = await supabase.auth.updateUser({ password: s1 });
-    if (error) { setHata("Kaydedilemedi: " + error.message); setMesgul(false); return; }
-    await supabase.from("profiles").update({ sifre_gecici: false }).eq("id", session.user.id);
+    if (error) { setHata(hataOnekli("Kaydedilemedi", error)); setMesgul(false); return; }
+    // RLS satırı filtrelerse hata DÖNMEZ, sessizce 0 satır güncellenir ve
+    // kullanıcı her girişte bu ekranı yeniden görür. count ile yakalıyoruz.
+    const { error: bayrakHata, count } = await supabase.from("profiles")
+      .update({ sifre_gecici: false }, { count: "exact" }).eq("id", session.user.id);
     setMesgul(false);
+    if (bayrakHata || count === 0) {
+      console.error("sifre_gecici temizlenemedi", bayrakHata, { count });
+      setHata("Şifreniz değiştirildi, ancak kayıt güncellenemedi; bu ekran tekrar çıkabilir. Lütfen yönetime bildirin.");
+      return;
+    }
     if (onBitti) onBitti();
   }
 
@@ -34,7 +44,7 @@ export default function SifreDegistir({ session, onBitti }) {
         <input type="password" placeholder="Yeni şifre (tekrar)" value={s2} onChange={(e) => setS2(e.target.value)} style={inp} />
         {hata && <div style={{ color: "#b91c1c", fontSize: 13, marginBottom: 10 }}>{hata}</div>}
         <button onClick={kaydet} disabled={mesgul} style={btn}>{mesgul ? "Kaydediliyor…" : "Kaydet ve devam et"}</button>
-        <button onClick={() => supabase.auth.signOut()} style={{ ...btn, background: "#fff", color: "#64748b", border: "1px solid #e5e7eb", marginTop: 8 }}>Çıkış</button>
+        <button onClick={() => cikisYap()} style={{ ...btn, background: "#fff", color: "#64748b", border: "1px solid #e5e7eb", marginTop: 8 }}>Çıkış</button>
       </div>
     </div></main></div>
   );
