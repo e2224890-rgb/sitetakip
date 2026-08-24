@@ -6,6 +6,7 @@ import { haneBaslik, yakRenk } from "../../lib/format";
 import { YAKLASIM_LISTE, yaklasimBilgi } from "../../lib/constants";
 import { KAPSAMLAR } from "../../lib/constants";
 import Haneler from "./Haneler";
+import { hataOnekli } from "../../lib/hata";
 
 export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet, onSifirla, onKapat }) {
   const [yaklasim, setYaklasim] = useState(hane.yaklasim || 0);
@@ -29,10 +30,13 @@ export default function ZiyaretModal({ hane, isSite, mapsHref, mesgul, onKaydet,
         olusturan_id: session?.user?.id || null,
       }).select("id").single();
       if (error) throw error;
-      await supabase.from("talep_log").insert({ talep_id: t.id, durum: "yeni", not_: "Talep oluşturuldu", kullanici_id: session?.user?.id || null });
+      /* İlk süreç kaydını talep_log_tg trigger'ı zaten yazıyor
+         (islem='olusturuldu', aciklama=başlık). Buradaki elle insert hem çift
+         kayıt üretecekti hem de talep_log.islem NOT NULL olduğu ve
+         gönderilmediği için her seferinde hataya düşüyordu. */
       setTalep({ kisi_id: "", ad_soyad: "", telefon: "", kategori: "", baslik: "", aciklama: "", oncelik: "normal" });
       setTalepAcik(false); setTalepMesaj("Talep kaydedildi ✓");
-    } catch (e) { setTalepMesaj("Kaydedilemedi: " + (e?.message || e)); }
+    } catch (e) { setTalepMesaj(hataOnekli("Kaydedilemedi", e)); }
     setTalepMesgul(false);
   }
   const [gecmis, setGecmis] = useState(null);

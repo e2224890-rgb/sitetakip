@@ -1,13 +1,23 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
+import { hataOnekli } from "../../lib/hata";
 
+/* ANAHTARLAR VERİTABANI ENUM'UNA UYMAK ZORUNDA.
+   talep.durum kolonu `talep_durum` enum'u ve yalnızca şu değerleri kabul ediyor:
+     yeni · inceleniyor · havale · cozuldu · reddedildi
+   Burada eskiden "incelemede", "yonlendirildi", "kapandi" yazıyordu; bunlar
+   enum'da yok, dolayısıyla o üç duruma geçiş denemesi
+     22P02: invalid input syntax for type talep_durum
+   ile düşüyordu — yani süreç yalnızca "Yeni" ve "Çözüldü" arasında
+   ilerletilebiliyordu. Ekranda görünen Türkçe etiketler (ad) aynı kaldı,
+   yalnızca veritabanına giden anahtar (k) düzeltildi. */
 const DURUMLAR = [
   { k: "yeni", ad: "Yeni", renk: "#2563eb" },
-  { k: "incelemede", ad: "İncelemede", renk: "#ea580c" },
-  { k: "yonlendirildi", ad: "Yönlendirildi", renk: "#7c3aed" },
+  { k: "inceleniyor", ad: "İncelemede", renk: "#ea580c" },
+  { k: "havale", ad: "Yönlendirildi", renk: "#7c3aed" },
   { k: "cozuldu", ad: "Çözüldü", renk: "#16a34a" },
-  { k: "kapandi", ad: "Kapandı", renk: "#64748b" },
+  { k: "reddedildi", ad: "Reddedildi", renk: "#64748b" },
 ];
 const durumBilgi = (k) => DURUMLAR.find((d) => d.k === k) || { ad: k, renk: "#94a3b8" };
 const oncelikBilgi = { dusuk: { ad: "Düşük", renk: "#94a3b8" }, normal: { ad: "Normal", renk: "#2563eb" }, yuksek: { ad: "Yüksek", renk: "#dc2626" } };
@@ -40,11 +50,30 @@ export default function Talepler({ profil }) {
     setMesgul(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      await supabase.from("talep").update({ durum: yeniDurum, updated_at: new Date().toISOString() }).eq("id", sec.id);
-      await supabase.from("talep_log").insert({ talep_id: sec.id, durum: yeniDurum, not_: yeniNot.trim() || null, kullanici_id: session?.user?.id || null });
+      // Supabase hata fırlatmaz, { error } döndürür — bu yüzden aşağıdaki catch
+      // eskiden hiç çalışmıyor, RLS engelinde kullanıcı "güncellendi" sanıyordu.
+      const { error: eUpd, count } = await supabase.from("talep")
+        .update({ durum: yeniDurum, updated_at: new Date().toISOString() }, { count: "exact" }).eq("id", sec.id);
+      if (eUpd) throw eUpd;
+      if (count === 0) throw new Error("Bu talebi güncelleme yetkiniz yok.");
+
+      /* SÜREÇ KAYDINI TRIGGER YAZIYOR.
+         talep_log_tg, talep üzerindeki her durum değişiminde islem='durum' ile
+         satırı kendisi ekliyor. Burada ayrıca insert yapmak çift kayıt demekti;
+         üstelik talep_log.islem NOT NULL olduğu ve gönderilmediği için bu
+         insert zaten her seferinde 23502 ile düşüyordu (sessizce yutuluyordu).
+         Yalnızca kullanıcı not yazdıysa ek bir satır ekliyoruz. */
+      const not = yeniNot.trim();
+      if (not) {
+        const { error: eLog } = await supabase.from("talep_log").insert({
+          talep_id: sec.id, durum: yeniDurum, islem: "not",
+          not_: not, kullanici_id: session?.user?.id || null,
+        });
+        if (eLog) throw eLog;
+      }
       const guncel = { ...sec, durum: yeniDurum };
       await yukle(); await detayAc(guncel); setYeniNot("");
-    } catch (e) { alert("Güncellenemedi: " + (e?.message || e)); }
+    } catch (e) { alert(hataOnekli("Güncellenemedi", e)); }
     setMesgul(false);
   }
 
