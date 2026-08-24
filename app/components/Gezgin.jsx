@@ -8,7 +8,6 @@ import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ILCE_BASKANI, IL_SORUMLULAR } from "../../lib/constants";
 import StatCard from "./StatCard";
 import { hataMetni } from "../../lib/hata";
-import { tumSatirlar } from "../../lib/sayfali";
 
 // İlçe toplam nüfusu (seçmenden bağımsız, resmî/tahmini nüfus). İleride başka ilçe eklenince buraya yazılır.
 const ILCE_NUFUS = { "Başakşehir": 536797 };
@@ -122,23 +121,24 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
     (async () => {
       const { data: bs } = await supabase.from("bolge").select("id").in("mahalle_id", ids);
       const bIds = (bs || []).map((b) => b.id);
-      // Hangi bölgelerde GERÇEKTEN kişi var? kisi -> hane -> bolge (site haneleri hariç)
-      const [skR, sgR, hkR] = await Promise.all([
+      /* "Hangi bölgelerde gerçekten kişi var?" sorusu için eskiden ilçenin TÜM
+         site-dışı hanesi (33 binden fazla satır) kisi(id) gömülü olarak
+         çekiliyordu. Sayfalamasız hâli 1000'de sessizce kesiliyor ve bölgelerin
+         çoğunu "kişisiz" gösteriyordu; sayfalanınca da ~34 ardışık istek
+         atıyordu — üstelik bu yalnızca bir kart üzerine gelince görünen özet
+         için.
+         mv_bolge_ozet bu sayıyı bölge başına hazır tutuyor (site haneleri
+         zaten hariç). Tek istek, aynı sonuç: 223 dolu bölge. */
+      const [skR, sgR, boR] = await Promise.all([
         supabase.from("sokak").select("*", { count: "exact", head: true }).in("mahalle_id", ids),
         bIds.length ? supabase.from("sokak_grup").select("bolge_id").in("bolge_id", bIds) : Promise.resolve({ data: [] }),
-        // 1000 satır kesilmesi: en büyük mahallede 26 binden fazla hane var,
-        // sayfalanmadan çekilince bölgelerin çoğu "kişisiz" görünüyordu.
-        bIds.length ? tumSatirlar((bas, son) => supabase.from("hane")
-          .select("bolge_id, kisi(id)", { count: "exact" })
-          .is("site_kayit_id", null).not("bolge_id", "is", null).in("bolge_id", bIds)
-          .order("id").range(bas, son)) : Promise.resolve([]),
+        supabase.from("mv_bolge_ozet").select("bolge_id, kisi").in("mahalle_id", ids),
       ]);
       if (iptal) return;
       const gruplar = sgR.data || [];
       const grupluSet = new Set(gruplar.map((g) => g.bolge_id));        // grubu olan bölgeler
-      // kişili bölge = içinde en az 1 kişi olan hane bulunan bölge
       const doluSet = new Set();
-      (hkR || []).forEach((h) => { if (h.kisi && h.kisi.length) doluSet.add(h.bolge_id); });
+      (boR.data || []).forEach((b) => { if ((b.kisi || 0) > 0) doluSet.add(b.bolge_id); });
       // Gerçek bekleyen iş = kişili ama grupsuz bölgeler
       let bekleyen = 0; doluSet.forEach((id) => { if (!grupluSet.has(id)) bekleyen++; });
       const bilgi = {
