@@ -9,3 +9,17 @@ node_modules
 
 # kişisel araç ayarları
 .claude/settings.local.json
+
+# derleme/araç çıktıları
+/out
+*.tsbuildinfo
+.vercel
+
+# editör
+.DS_Store
+Thumbs.db
+*.swp
+
+# geçici çalışma dosyaları
+/tmp
+*.log
