@@ -2,9 +2,11 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
+import { cikisYap } from "../../lib/oturum";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import { LogOut, UserCheck } from "lucide-react";
 import { blokParts, normBlok } from "../../lib/format";
+import { tumSatirlar } from "../../lib/sayfali";
 import { BLOK_ROL_AD, SITE_YK_AD, SITE_YK_LISTE } from "../../lib/constants";
 const Haneler = dynamic(() => import("./Haneler"), { ssr: false, loading: () => <div className="merkez">Yükleniyor…</div> });
 
@@ -31,7 +33,11 @@ export default function BlokSorumluGorunum({ session, profil }) {
         cacheYaz(snapAnahtar, { site: s, haneIds: [] });
         return;
       }
-      const { data: hs } = await supabase.from("hane").select("id, kapi_blok").eq("site_kayit_id", profil.site_kayit_id);
+      // En büyük sitede 4.802 hane var; sayfalanmadan çekilince blok
+      // görevlisinin hane listesi 1000'de kesiliyordu.
+      const hs = await tumSatirlar((bas, son) => supabase.from("hane")
+        .select("id, kapi_blok", { count: "exact" })
+        .eq("site_kayit_id", profil.site_kayit_id).order("id").range(bas, son));
       const want = blokParts(profil.blok);
       const ids = (hs || []).filter((h) => want.includes(normBlok(h.kapi_blok))).map((h) => h.id);
       setSite(s); setHaneIds(ids); setHata(null);
@@ -47,7 +53,7 @@ export default function BlokSorumluGorunum({ session, profil }) {
         <div className="brand"><div className="logo"><UserCheck size={18} /></div>
           <div><div className="brand-t">{unvan} · {profil.ad_soyad || session.user.email}</div>
             <div className="brand-s">{site ? (siteGeneli ? site.ad : `${site.ad} · ${blokAd} Blok`) : "Saha Teşkilatı"}</div></div></div>
-        <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış</button>
+        <button className="btn cikis" onClick={() => cikisYap()}><LogOut size={14} /> Çıkış</button>
       </header>
       <main className="main"><div className="page">
         {hata ? <div className="merkez">{hata}</div>

@@ -8,6 +8,17 @@ import EkipRozet from "./EkipRozet";
 import Talepler from "./Talepler";
 import { StickyNote, ClipboardCheck, Boxes, UserCheck, Search, LayoutDashboard, TrendingUp, Network, AlertTriangle, Users, Home, ShieldCheck, MapPin } from "lucide-react";
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from "recharts";
+import { hataOnekli } from "../../lib/hata";
+import { tumSatirlar } from "../../lib/sayfali";
+
+/* 1000 SATIR KESİLMESİ.
+   PostgREST tek istekte en fazla 1000 satır döndürür ve aşıldığında HATA
+   VERMEZ, sessizce keser. v_rapor_sokak Başakşehir için 1012 satır — yani bu
+   rapor 12 sokağı hiç saymıyordu. Aşağıdaki yardımcılar sayfalayarak çeker. */
+const raporSokak = (ilceId) => tumSatirlar((bas, son) =>
+  supabase.from("v_rapor_sokak").select("*", { count: "exact" }).eq("ilce_id", ilceId).order("sokak_id").range(bas, son));
+const raporSite = (ilceId) => tumSatirlar((bas, son) =>
+  supabase.from("v_rapor_site").select("*", { count: "exact" }).eq("ilce_id", ilceId).order("site_kayit_id").range(bas, son));
 
 const ROL_ET = { blok_sorumlu: "Blok Sorumlusu", ana_kademe: "Ana Kademe Temsilci", kadin_kollari: "Kadın Temsilci", genclik_kollari: "Gençlik Temsilci" };
 const BLOK_ROLLER = Object.keys(ROL_ET);
@@ -35,7 +46,11 @@ async function parcaliIn(tablo, kolon, idler, key = "id") {
   const uniq = [...new Set((idler || []).filter(Boolean))];
   const out = [];
   for (let i = 0; i < uniq.length; i += 150) {
-    const { data } = await supabase.from(tablo).select(kolon).in(key, uniq.slice(i, i + 150));
+    // Parça 150 id içeriyor ama DÖNEN SATIR sayısı 1000'i aşabilir (yoğun
+    // apartmanlarda hane başına kişi çok) — burada da sayfalamak gerekiyor.
+    const dilim = uniq.slice(i, i + 150);
+    const data = await tumSatirlar((bas, son) => supabase.from(tablo)
+      .select(kolon, { count: "exact" }).in(key, dilim).order("id").range(bas, son));
     if (data) out.push(...data);
   }
   return out;
@@ -63,7 +78,8 @@ export default function BaskanRapor({ profil }) {
   const [secmenRapor, setSecmenRapor] = useState(null); // { 1:[], 3:[], 5:[] } renk -> kişiler
   const [renkSec, setRenkSec] = useState(5); // 1 siyah, 3 gri, 5 beyaz
   async function secmenRaporYukle() {
-    const { data: zs } = await supabase.from("ziyaret").select("hane_id, yaklasim").in("yaklasim", [1, 3, 5]);
+    const zs = await tumSatirlar((bas, son) => supabase.from("ziyaret")
+      .select("hane_id, yaklasim", { count: "exact" }).in("yaklasim", [1, 3, 5]).order("id").range(bas, son));
     const haneRenk = {}; (zs || []).forEach((z) => { if (z.hane_id) haneRenk[z.hane_id] = z.yaklasim; });
     const haneIds = Object.keys(haneRenk);
     if (!haneIds.length) { setSecmenRapor({ 1: [], 3: [], 5: [] }); return; }
@@ -158,7 +174,7 @@ export default function BaskanRapor({ profil }) {
       await supabase.from("teskilat").insert({ ilce_id: ilceId, mahalle_id: null, unvan: "ilce_baskani", ad_soyad: ibForm.ad.trim(), telefon: ibForm.tel.trim() || null, sira: 0, profil_id });
       await ilceBaskanYukle();
       if (sonuc) setIbForm((f) => ({ ...f, mesgul: false, sonuc })); else setIbForm(null);
-    } catch (e) { alert("Kaydedilemedi: " + (e?.message || e)); setIbForm((f) => ({ ...f, mesgul: false })); }
+    } catch (e) { alert(hataOnekli("Kaydedilemedi", e)); setIbForm((f) => ({ ...f, mesgul: false })); }
   }
   async function ilSorumluYukle() {
     if (!ilceId) { setIlSorumlular([]); return; }
@@ -171,7 +187,7 @@ export default function BaskanRapor({ profil }) {
       const { error } = await supabase.from("teskilat").insert({ ilce_id: ilceId, mahalle_id: null, unvan: "il_sorumlu", ad_soyad: d.ad.trim(), gorev_metin: (d.gorev || "").trim() || "İl Sorumlusu", telefon: (d.tel || "").trim() || null, sira: ilSorumlular.length });
       if (error) throw error;
       setIlSorForm(null); await ilSorumluYukle();
-    } catch (e) { alert("Eklenemedi: " + (e?.message || e)); }
+    } catch (e) { alert(hataOnekli("Eklenemedi", e)); }
   }
   async function ilSorumluSil(row) {
     if (!confirm(`${row.ad_soyad} il sorumlularından çıkarılsın mı?`)) return;
@@ -217,8 +233,8 @@ export default function BaskanRapor({ profil }) {
         // Ziyaret/hane: rapor view'larından (kolonlar: toplam, edilen, mahalle_id)
         // Seçmen/üye: mv_mahalle_ozet'ten (mahalle bazında hazır)
         const [sk, st, mo, mahL] = await Promise.all([
-          supabase.from("v_rapor_sokak").select("*").eq("ilce_id", ilceId),
-          supabase.from("v_rapor_site").select("*").eq("ilce_id", ilceId),
+          raporSokak(ilceId),
+          raporSite(ilceId),
           supabase.from("mv_mahalle_ozet").select("mahalle_id, kisi, hane, uye"),
           supabase.from("mahalle").select("id, ad").eq("ilce_id", ilceId),
         ]);
@@ -226,8 +242,8 @@ export default function BaskanRapor({ profil }) {
         const mm = {};
         const g = (id) => (mm[id] ||= { mahalle_id: id, ad: adOf[id] || mahAd[id] || "—", hane: 0, kisi: 0, uye: 0, ziyaret: 0, site: 0, sokak: 0 });
         // ziyaret + hane (rapor view'larından)
-        (sk.data || []).forEach((r) => { if (!r.mahalle_id) return; const x = g(r.mahalle_id); x.ziyaret += r.edilen || 0; x.sokak += 1; });
-        (st.data || []).forEach((r) => { if (!r.mahalle_id) return; const x = g(r.mahalle_id); x.ziyaret += r.edilen || 0; x.site += 1; });
+        (sk || []).forEach((r) => { if (!r.mahalle_id) return; const x = g(r.mahalle_id); x.ziyaret += r.edilen || 0; x.sokak += 1; });
+        (st || []).forEach((r) => { if (!r.mahalle_id) return; const x = g(r.mahalle_id); x.ziyaret += r.edilen || 0; x.site += 1; });
         // seçmen/üye/hane (mv_mahalle_ozet — asıl kaynak)
         (mo.data || []).forEach((r) => { if (!r.mahalle_id) return; const x = g(r.mahalle_id); x.kisi = r.kisi || 0; x.uye = r.uye || 0; x.hane = r.hane || 0; });
         const mahOzet = Object.values(mm).filter((x) => x.kisi || x.hane).sort((a, b) => b.kisi - a.kisi);
@@ -253,14 +269,14 @@ export default function BaskanRapor({ profil }) {
         setD((s) => ({ ...s, notlar: notlar.map((n) => ({ ...n, hane: hBy[n.hane_id], siteAd: sitAd[hBy[n.hane_id]?.site_kayit_id], kisi: profBy[n.kullanici_id] })) }));
       } else if (t === "ziyaret") {
         const [sk, st, toplamR, edilenR] = await Promise.all([
-          supabase.from("v_rapor_sokak").select("*").eq("ilce_id", ilceId),
-          supabase.from("v_rapor_site").select("*").eq("ilce_id", ilceId),
+          raporSokak(ilceId),
+          raporSite(ilceId),
           // Gerçek hane (çift saymadan): her hane 1 kez
           supabase.from("hane").select("*", { count: "exact", head: true }).eq("ilce_id", ilceId),
           // Ziyaret edilen benzersiz hane
           supabase.from("ziyaret").select("hane_id", { count: "exact", head: true }).eq("ilce_id", ilceId).eq("durum", "ziyaret_edildi"),
         ]);
-        setD((s) => ({ ...s, sokak: sk.data || [], site: st.data || [], gercekToplam: toplamR.count || 0, gercekEdilen: edilenR.count || 0 }));
+        setD((s) => ({ ...s, sokak: sk || [], site: st || [], gercekToplam: toplamR.count || 0, gercekEdilen: edilenR.count || 0 }));
       } else if (t === "bloklar") {
         const { data: bg } = await supabase.from("profiles")
           .select("id, ad_soyad, eposta, telefon, meslek, rol, blok, site_kayit_id")

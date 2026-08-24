@@ -8,6 +8,7 @@ import KapsamSokaklar from "./KapsamSokaklar";
 import DemografiPano from "./DemografiPano";
 import { Building2, Map, ChevronRight as ChevronRightIc } from "lucide-react";
 import { sokakGrupBol } from "./EkipAtama";
+import { hataMetni } from "../../lib/hata";
 
 export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
   const [liste, setListe] = useState(null);
@@ -53,7 +54,7 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
         const grupSayisi = await sokakGrupBol(hedefler[i].id, 150);
         if (!grupSayisi) bosKalan.push(hedefler[i].kod); // bölünecek serbest hane yok
       }
-      catch (e) { hata = `${hedefler[i].kod}: ${e?.message || e}`; break; }
+      catch (e) { hata = `${hedefler[i].kod}: ${hataMetni(e)}`; break; }
       setTopluMesgul({ done: i + 1, total: hedefler.length });
     }
     await grupYenile((liste || []).map((b) => b.id));
@@ -82,8 +83,10 @@ export default function Bolgeler({ mahalle, onSec, onSecGrup }) {
       (async () => {
         const map = {}; const ADIM = 1000;
         for (let bas = 0; ; bas += ADIM) {
+          // .order("id") ŞART: sıralama olmadan sayfa sınırları belirsizdir,
+          // aynı satır iki sayfada çıkabilir ya da hiç gelmeyebilir.
           const { data, error } = await supabase.from("hane").select("bolge_id")
-            .eq("mahalle_id", mahalle.id).not("site_kayit_id", "is", null).range(bas, bas + ADIM - 1);
+            .eq("mahalle_id", mahalle.id).not("site_kayit_id", "is", null).order("id").range(bas, bas + ADIM - 1);
           if (error) break;
           (data || []).forEach((h) => { if (h.bolge_id) map[h.bolge_id] = (map[h.bolge_id] || 0) + 1; });
           if (!data || data.length < ADIM) break;

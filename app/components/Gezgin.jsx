@@ -7,6 +7,8 @@ import { fmt, oran, NUF_RENK } from "../../lib/format";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ILCE_BASKANI, IL_SORUMLULAR } from "../../lib/constants";
 import StatCard from "./StatCard";
+import { hataMetni } from "../../lib/hata";
+import { tumSatirlar } from "../../lib/sayfali";
 
 // İlçe toplam nüfusu (seçmenden bağımsız, resmî/tahmini nüfus). İleride başka ilçe eklenince buraya yazılır.
 const ILCE_NUFUS = { "Başakşehir": 536797 };
@@ -96,7 +98,7 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
       const { data, error } = await supabase.from("mv_mahalle_nufus_il")
         .select("nufus_il, kisi").in("mahalle_id", ids);
       if (iptal) return;
-      if (error) { setNufHata(error.message || String(error)); if (!snap) setNufIl([]); return; }
+      if (error) { setNufHata(hataMetni(error)); if (!snap) setNufIl([]); return; }
       const m = {};
       (data || []).forEach((r) => { const il = (r.nufus_il || "").trim() || "Bilinmiyor"; m[il] = (m[il] || 0) + (r.kisi || 0); });
       const arr = Object.entries(m).map(([ad, deger]) => ({ ad, deger })).sort((a, b) => b.deger - a.deger);
@@ -124,14 +126,19 @@ export default function Gezgin({ mahalleler, toplam, bolgeToplam, ilceAd, onSec 
       const [skR, sgR, hkR] = await Promise.all([
         supabase.from("sokak").select("*", { count: "exact", head: true }).in("mahalle_id", ids),
         bIds.length ? supabase.from("sokak_grup").select("bolge_id").in("bolge_id", bIds) : Promise.resolve({ data: [] }),
-        bIds.length ? supabase.from("hane").select("bolge_id, kisi(id)").is("site_kayit_id", null).not("bolge_id", "is", null).in("bolge_id", bIds) : Promise.resolve({ data: [] }),
+        // 1000 satır kesilmesi: en büyük mahallede 26 binden fazla hane var,
+        // sayfalanmadan çekilince bölgelerin çoğu "kişisiz" görünüyordu.
+        bIds.length ? tumSatirlar((bas, son) => supabase.from("hane")
+          .select("bolge_id, kisi(id)", { count: "exact" })
+          .is("site_kayit_id", null).not("bolge_id", "is", null).in("bolge_id", bIds)
+          .order("id").range(bas, son)) : Promise.resolve([]),
       ]);
       if (iptal) return;
       const gruplar = sgR.data || [];
       const grupluSet = new Set(gruplar.map((g) => g.bolge_id));        // grubu olan bölgeler
       // kişili bölge = içinde en az 1 kişi olan hane bulunan bölge
       const doluSet = new Set();
-      (hkR.data || []).forEach((h) => { if (h.kisi && h.kisi.length) doluSet.add(h.bolge_id); });
+      (hkR || []).forEach((h) => { if (h.kisi && h.kisi.length) doluSet.add(h.bolge_id); });
       // Gerçek bekleyen iş = kişili ama grupsuz bölgeler
       let bekleyen = 0; doluSet.forEach((id) => { if (!grupluSet.has(id)) bekleyen++; });
       const bilgi = {
