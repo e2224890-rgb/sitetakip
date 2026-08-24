@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
+import { hataMetni, hataOnekli } from "../../lib/hata";
 
 export default function EkipAtama({ site }) {
   const BLOK_ROLLER = [["ana_kademe", "Ana Kademe Temsilci"], ["kadin_kollari", "Kadın Temsilci"], ["genclik_kollari", "Gençlik Temsilci"]];
@@ -83,7 +84,7 @@ export async function sokakGrupBol(bolgeId, hedef) {
       let q = supabase.from(tablo).select(kolonlar).eq("bolge_id", bolgeId);
       if (ekle) q = ekle(q);
       const { data, error } = await q.range(bas, bas + ADIM - 1);
-      if (error) throw new Error(`${tablo} okunamadı: ${error.message}`);
+      if (error) throw new Error(`${tablo} okunamadı: ${hataMetni(error)}`);
       hepsi.push(...(data || []));
       if (!data || data.length < ADIM) break;
     }
@@ -153,13 +154,18 @@ export async function sokakGrupBol(bolgeId, hedef) {
     }
   }
   if (chunks.length === 0) return 0;
-  await supabase.from("sokak_grup").delete().eq("bolge_id", bolgeId);
+  /* SİL–SONRA–YAZ RİSKİ. Burada işlem (transaction) yok: silme başarılı olup
+     ekleme başarısız olursa bölgenin TÜM grupları yok olur ve yerine hiçbir şey
+     gelmez. Silmenin hatası eskiden hiç okunmuyordu; en azından silme
+     başarısızsa devam etmiyoruz ve ekleme hatası zaten aşağıda fırlatılıyor. */
+  const { error: silErr } = await supabase.from("sokak_grup").delete().eq("bolge_id", bolgeId);
+  if (silErr) throw new Error(hataOnekli("Eski gruplar silinemedi, bölme iptal edildi", silErr));
   const rows = chunks.map((c, i) => ({
     bolge_id: bolgeId, no: i + 1, kisi: c.kisi, uye: c.uye, hane: c.ids.length,
     kapi_bas: String(c.kb ?? ""), kapi_son: String(c.ks2 ?? ""),
   }));
   const { data: ins, error: insErr } = await supabase.from("sokak_grup").insert(rows).select("id");
-  if (insErr) throw new Error("Grup kaydı oluşturulamadı: " + insErr.message);
+  if (insErr) throw new Error(hataOnekli("Grup kaydı oluşturulamadı", insErr));
   if (!ins || ins.length !== chunks.length) throw new Error("Grup kaydı eksik döndü (sokak_grup SELECT/RLS?).");
   let updErr = null, yazilan = 0, beklenen = 0;
   for (let i = 0; i < chunks.length; i++) {
@@ -170,7 +176,7 @@ export async function sokakGrupBol(bolgeId, hedef) {
       if (error) updErr = error; else yazilan += (upd?.length || 0);
     }
   }
-  if (updErr) throw new Error("hane.grup_id yazılamadı — 11_hane_grup.sql çalıştı mı? (" + updErr.message + ")");
+  if (updErr) throw new Error("hane.grup_id yazılamadı — 11_hane_grup.sql çalıştı mı? (" + hataMetni(updErr) + ")");
   if (beklenen > 0 && yazilan === 0) throw new Error("hane.grup_id'ye 0 satır yazıldı. Sebep: ya grup_id kolonu yok (11_hane_grup.sql çalıştır), ya da RLS hane UPDATE'i engelliyor.");
   return chunks.length;
 }

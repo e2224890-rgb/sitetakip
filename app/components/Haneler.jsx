@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { Users, FileText, Search, MapPin, CheckCircle2, Circle, Download, UserCheck, X } from "lucide-react";
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import { NUF_RENK, csvIndir, fmt, haneBaslik, oran, sokakAdres, yakRenk } from "../../lib/format";
+import {NUF_RENK, csvIndir, fmt, haneBaslik, oran, sokakAdres, yakRenk, epostaUret } from "../../lib/format";
 import { yaklasimBilgi, YAKLASIM_LISTE } from "../../lib/constants";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import { tumSatirlar } from "../../lib/sayfali";
@@ -12,6 +12,7 @@ import EkipRozet from "./EkipRozet";
 import SokakBolStrip from "./SokakBolStrip";
 import Sorumlular from "./Sorumlular";
 import ZiyaretModal from "./ZiyaretModal";
+import { hataOnekli } from "../../lib/hata";
 
 export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, haneIds, grup }) {
   const isSite = birim.tip === "site";
@@ -47,6 +48,23 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
   // --- Seçmenden Sokak Başkanı ata (hesap otomatik açılır) ---
   const [baskanMesgul, setBaskanMesgul] = useState(null); // atama sırasında kisi.id
   const [baskanModal, setBaskanModal] = useState(null);   // { asama:"onay"|"islem"|"sonuc"|"hata", ... }
+  // "Başkan yap" tek tıkla giriş hesabı açıp rolü "sorumlu" yaptığı ve
+  // bolge.sorumlu_id'yi değiştirdiği için SADECE il/ilçe yönetimine gösterilir.
+  // Gevşek `yonetici` prop'una bağlanmaz: o prop düzenleme yetkisini temsil ediyor
+  // ve başka bir ekrandan yanlışlıkla geçirilirse buton da sızardı. Rol burada
+  // doğrudan okunur. (Sunucu tarafı ayrı korunmalı — bkz. sql/INCELEME C bölümü.)
+  const BASKAN_ATAYAN_ROLLER = ["il_yonetimi", "ilce_yonetimi"];
+  const [benimRol, setBenimRol] = useState(() => cacheOku(`profil:${userId}`)?.rol ?? null);
+  useEffect(() => {
+    if (!userId) return;
+    let iptal = false;
+    (async () => {
+      const { data } = await supabase.from("profiles").select("rol").eq("id", userId).single();
+      if (!iptal) setBenimRol(data?.rol ?? null);
+    })();
+    return () => { iptal = true; };
+  }, [userId]);
+  const baskanAtayabilir = BASKAN_ATAYAN_ROLLER.includes(benimRol);
   const trSlug = (t) => (t || "").toLocaleLowerCase("tr")
     .replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ö/g, "o").replace(/ç/g, "c")
     .replace(/[^a-z0-9]/g, "");
@@ -61,7 +79,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
     const m = baskanModal; if (!m || m.asama !== "onay") return;
     setBaskanModal({ ...m, asama: "islem" });
     try {
-      const eposta = `${trSlug(m.k.ad) || "ad"}.${trSlug(m.k.soyad) || "soyad"}@akpartibasaksehir.com`;
+      const eposta = epostaUret(`${m.k.ad || ""} ${m.k.soyad || ""}`);
       const { data: { session } } = await supabase.auth.getSession();
       const r = await fetch("/api/hesap-ekle", {
         method: "POST",
@@ -80,7 +98,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
       yukle();                                 // hane/ekip verisini tazele (tam sayfa reload yok)
       setBaskanModal({ asama: "sonuc", ad: m.ad, eposta: j.eposta || eposta, sifre: "saha2026" });
     } catch (e) {
-      setBaskanModal({ asama: "hata", mesaj: "Sokak başkanı atanamadı: " + (e?.message || e) });
+      setBaskanModal({ asama: "hata", mesaj: hataOnekli("Sokak başkanı atanamadı", e) });
     }
   }
   const [zModal, setZModal] = useState(null);
@@ -187,11 +205,28 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
   }
   useEffect(() => { yukle(); }, [birim.id, birim.yenile]);
 
+  /* SESSİZ KAYIP KAPATILDI.
+     Supabase yazma çağrıları hata FIRLATMAZ, sonucun içinde { error } döndürür.
+     Eski kod hem bunu okumuyor hem de `try { ... } catch {}` ile her şeyi
+     yutuyordu. Sonuç: RLS engeli, ağ kesintisi veya kısıt ihlalinde saha
+     görevlisi ekranda yeşil onayı görüyor ama veritabanına hiçbir şey
+     yazılmıyordu — yapılan iş sessizce kayboluyordu.
+     Artık hata fırlatılıyor; çağıran ekranı eski haline döndürüp kullanıcıya
+     söylüyor. */
   async function ziyaretYaz(h, patch) {
-    const { data: m } = await supabase.from("ziyaret").select("id").eq("hane_id", h.id).limit(1);
-    if (m && m.length) return supabase.from("ziyaret").update(patch).eq("id", m[0].id);
-    return supabase.from("ziyaret").insert({ ilce_id: h.ilce_id, bolge_id: isSite ? null : birim.id, hane_id: h.id, kullanici_id: userId, ...patch });
+    // .order("id") — birden fazla ziyaret satırı oluşursa hangisinin
+    // güncelleneceği belirsiz kalmasın.
+    const { data: m, error: eSec } = await supabase.from("ziyaret")
+      .select("id").eq("hane_id", h.id).order("id").limit(1);
+    if (eSec) throw eSec;
+    const { error } = (m && m.length)
+      ? await supabase.from("ziyaret").update(patch).eq("id", m[0].id)
+      : await supabase.from("ziyaret").insert({ ilce_id: h.ilce_id, bolge_id: isSite ? null : birim.id, hane_id: h.id, kullanici_id: userId, ...patch });
+    if (error) throw error;
   }
+
+  // İyimser güncellemeyi geri al: satırı yazma öncesi haline döndür.
+  const geriAl = (h) => setHaneler((p) => (p || []).map((x) => x.id === h.id ? h : x));
 
   async function kaydetZiyaret(h, { yaklasim, kapsam, not_ }) {
     if (mesgul) return;
@@ -199,15 +234,22 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
     const now = new Date().toISOString();
     const patch = { durum: "ziyaret_edildi", tarih: now, onceki_tarih: h.tarih || h.onceki_tarih || null, yaklasim: yaklasim || null, kapsam: kapsam || null, not_: not_ ?? null };
     setHaneler((p) => p.map((x) => x.id === h.id ? { ...x, ziyaret: true, tarih: now, onceki_tarih: patch.onceki_tarih, yaklasim: patch.yaklasim, kapsam: patch.kapsam || "", not_: patch.not_ || "" } : x));
-    try { await ziyaretYaz(h, patch); } catch {}
     try {
-      await supabase.from("ziyaret_log").insert({
+      await ziyaretYaz(h, patch);
+      // ziyaret_log ikincil kayıt: burada hata olsa da asıl ziyaret yazıldı.
+      // Yine de sessiz kalmasın.
+      const { error: eLog } = await supabase.from("ziyaret_log").insert({
         hane_id: h.id, kullanici_id: userId, ilce_id: h.ilce_id,
         bolge_id: isSite ? null : birim.id, tarih: now,
         yaklasim: yaklasim || null, kapsam: kapsam || null, not_: not_ ?? null, durum: "ziyaret_edildi",
       });
-    } catch {}
-    setMesgul(null); setZModal(null);
+      if (eLog) console.error("ziyaret_log yazılamadı:", eLog);
+      setZModal(null);
+    } catch (e) {
+      geriAl(h);
+      alert(hataOnekli("Ziyaret kaydedilemedi", e));
+    }
+    setMesgul(null);
   }
 
   async function sifirla(h) {
@@ -215,20 +257,24 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
     setMesgul(h.id);
     const patch = { durum: "bekliyor", onceki_tarih: h.tarih || h.onceki_tarih || null, tarih: null };
     setHaneler((p) => p.map((x) => x.id === h.id ? { ...x, ziyaret: false, onceki_tarih: patch.onceki_tarih, tarih: null } : x));
-    try { await ziyaretYaz(h, patch); } catch {}
-    setMesgul(null); setZModal(null);
+    try { await ziyaretYaz(h, patch); setZModal(null); }
+    catch (e) { geriAl(h); alert(hataOnekli("Ziyaret sıfırlanamadı", e)); }
+    setMesgul(null);
   }
 
   async function notKaydet(h) {
     const yeni = window.prompt(`${h.no} — ziyaret notu:`, h.not_ || "");
     if (yeni === null) return;
     setHaneler((p) => p.map((x) => x.id === h.id ? { ...x, not_: yeni } : x));
-    try { await ziyaretYaz(h, { not_: yeni }); } catch {}
+    try { await ziyaretYaz(h, { not_: yeni }); }
+    catch (e) { geriAl(h); alert(hataOnekli("Not kaydedilemedi", e)); }
   }
 
   async function hedefKaydet(tarih) {
+    const onceki = hedefTarih;
     setHedefTarih(tarih);
-    await supabase.from(tablo).update({ hedef_tarih: tarih || null }).eq("id", birim.id);
+    const { error } = await supabase.from(tablo).update({ hedef_tarih: tarih || null }).eq("id", birim.id);
+    if (error) { setHedefTarih(onceki); alert(hataOnekli("Hedef tarih kaydedilemedi", error)); }
   }
 
   const suzulmus = useMemo(() => {
@@ -634,7 +680,7 @@ export default function Haneler({ birim, userId, yonetici, planla, onGrupSec, ha
                               : potK
                                 ? <span style={{ fontSize: 10.5, fontWeight: 800, background: "#e0edff", color: "#1d4ed8", border: "1px solid #93c5fd", padding: "1px 7px", borderRadius: 999, marginLeft: 5 }}>POTANSİYEL</span>
                                 : <span style={{ fontSize: 10.5, fontWeight: 800, background: "#e7f6ec", color: "#15803d", border: "1px solid #a7e3bd", padding: "1px 7px", borderRadius: 999, marginLeft: 5 }}>ÜYE DEĞİL</span>}
-                            {yonetici && <button onClick={(e) => { e.stopPropagation(); baskanYapAc(k, h); }}
+                            {baskanAtayabilir && <button onClick={(e) => { e.stopPropagation(); baskanYapAc(k, h); }}
                               title="Sokak başkanı yap" style={{ marginLeft: 6, border: "1px solid #fde68a", background: "#fffbeb", borderRadius: 999, padding: "1px 8px", fontSize: 10.5, cursor: "pointer", color: "#92400e", fontWeight: 700 }}>
                               👑 Başkan yap</button>}
                           </span>

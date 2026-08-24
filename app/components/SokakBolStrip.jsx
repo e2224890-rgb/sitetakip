@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
 import Haneler from "./Haneler";
 import { sokakGrupBol } from "./EkipAtama";
+import { hataOnekli } from "../../lib/hata";
 
 export default function SokakBolStrip({ bolge, onChanged }) {
   const [gruplar, setGruplar] = useState(null);
@@ -24,7 +25,7 @@ export default function SokakBolStrip({ bolge, onChanged }) {
       if (onChanged) onChanged();
       if (n === 0) alert("Bu sokakta bölünecek hane bulunamadı.");
     } catch (e) {
-      alert("Bölme hatası: " + (e?.message || e));
+      alert(hataOnekli("Bölme hatası", e));
     }
     setMesgul(false);
   }
