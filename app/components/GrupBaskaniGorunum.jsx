@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
+import { cikisYap } from "../../lib/oturum";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ChevronRight, LogOut, UserCheck } from "lucide-react";
 import { fmt } from "../../lib/format";
@@ -55,7 +56,7 @@ export default function GrupBaskaniGorunum({ session, profil }) {
         <div className="brand"><div className="logo"><UserCheck size={18} /></div>
           <div><div className="brand-t">Sokak Yönetimi · {profil.ad_soyad || session.user.email}</div>
             <div className="brand-s">{sec.bolge.kod}-{sec.no}</div></div></div>
-        <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış</button>
+        <button className="btn cikis" onClick={() => cikisYap()}><LogOut size={14} /> Çıkış</button>
       </header>
         <main className="main"><div className="page">
           <div className="crumb"><a onClick={() => setSec(null)}>Grubum</a>
@@ -71,7 +72,7 @@ export default function GrupBaskaniGorunum({ session, profil }) {
         <div className="brand"><div className="logo"><UserCheck size={18} /></div>
           <div><div className="brand-t">Sokak Yönetimi · {profil.ad_soyad || session.user.email}</div>
             <div className="brand-s">Saha Teşkilatı</div></div></div>
-        <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış</button>
+        <button className="btn cikis" onClick={() => cikisYap()}><LogOut size={14} /> Çıkış</button>
       </header>
       <main className="main"><div className="page">
         <div className="head"><div><h2 className="disp">Grubum</h2>

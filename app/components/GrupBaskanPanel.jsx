@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
 import Haneler from "./Haneler";
 import Sorumlular from "./Sorumlular";
+import { hataOnekli } from "../../lib/hata";
 
 export default function GrupBaskanPanel({ grup, onAtandi }) {
   const [g, setG] = useState(grup);
@@ -22,7 +23,7 @@ export default function GrupBaskanPanel({ grup, onAtandi }) {
     const prof = profiller.find((p) => p.id === val);
     const ad = prof ? (prof.ad_soyad || prof.eposta) : null;
     const { data, error } = await supabase.from("sokak_grup").update({ baskan_id: val || null, baskan_ad: ad }).eq("id", g.id).select("id");
-    if (error) { setHata("Kaydedilemedi: " + error.message); return; }
+    if (error) { setHata(hataOnekli("Kaydedilemedi", error)); return; }
     if (!data || data.length === 0) { setHata("Kaydedilemedi — 0 satır güncellendi (sokak_grup UPDATE'i RLS engelliyor olabilir)."); return; }
     setG((x) => ({ ...x, baskan_id: val || null, baskan_ad: ad }));
     setAtandi(true); setTimeout(() => setAtandi(false), 1500);

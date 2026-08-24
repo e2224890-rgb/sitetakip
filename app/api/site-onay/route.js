@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { hataMetni } from "../../../lib/hata";
 
 // Sunucu tarafı: service_role burada kalır (NEXT_PUBLIC YOK).
 function admin() {
@@ -35,9 +36,9 @@ export async function POST(req) {
     const sid = site_kayit_id || null;
     const e1 = (await a.from("sokak").update({ site_kayit_id: sid, site_kaynak: kaynak }).eq("id", sokak_id)).error;
     const e2 = (await a.from("hane").update({ site_kayit_id: sid, site_kaynak: kaynak }).eq("sokak_id", sokak_id)).error;
-    if (e1 || e2) return Response.json({ error: (e1 || e2).message }, { status: 400 });
+    if (e1 || e2) return Response.json({ error: hataMetni(e1 || e2) }, { status: 400 });
     return Response.json({ ok: true });
   } catch (e) {
-    return Response.json({ error: String(e?.message || e) }, { status: 500 });
+    return Response.json({ error: hataMetni(e) }, { status: 500 });
   }
 }

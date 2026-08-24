@@ -4,6 +4,7 @@ import { supabase } from "../../lib/supabase";
 import { UserCheck, Crown, Phone, Users } from "lucide-react";
 import { BLOK_ROL_LISTE, BLOK_ROL_AD, SITE_YK_LISTE, SITE_YK_AD } from "../../lib/constants";
 import { blokParts } from "../../lib/format";
+import { hataMetni } from "../../lib/hata";
 
 // Rol -> rozet rengi
 const ROL_RENK = {
@@ -74,12 +75,12 @@ export default function SiteYonetimListe({ site }) {
       if (!hedef) { setYkMesaj(""); return; }
       const r = await fetch("/api/hesap-ekle", { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
         body: JSON.stringify({ id: hedef, rol: "sorumlu", blok: null }) });
-      if (!r.ok) { const j = await r.json().catch(() => ({})); setYkMesaj("Hata: " + (j.error || r.status)); return; }
+      if (!r.ok) { const j = await r.json().catch(() => ({})); setYkMesaj(hataMetni(j.error || { status: r.status })); return; }
     } else {
       // Ata: role çevir, bu siteye bağla, blok'u TEMİZLE (site geneli görev, bloğa bağlı değil)
       const r = await fetch("/api/hesap-ekle", { method: "PATCH", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
         body: JSON.stringify({ id: profileId, rol: gorevRol, site_kayit_id: site.id, blok: null }) });
-      if (!r.ok) { const j = await r.json().catch(() => ({})); setYkMesaj("Hata: " + (j.error || r.status)); return; }
+      if (!r.ok) { const j = await r.json().catch(() => ({})); setYkMesaj(hataMetni(j.error || { status: r.status })); return; }
     }
     setYkMesaj(""); await yukle();
   }

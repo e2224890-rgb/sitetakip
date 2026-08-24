@@ -7,6 +7,7 @@ import { fmt, oran, NUF_RENK } from "../../lib/format";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import StatCard from "./StatCard";
 import { MAHALLE_NUFUS, ILCE_BASKANI, MAHALLE_TESKILAT, ILCE_BIRIM } from "../../lib/constants";
+import { hataMetni } from "../../lib/hata";
 
 /*
   Paylaşımlı demografi panosu — her drill-down seviyesinde AYNI grafik seti, yalnız kapsam değişir.
@@ -119,7 +120,7 @@ export default function DemografiPano({ stat, ekstra, mahalleIds, baslik = "", c
       const { data, error } = await supabase.from("mv_mahalle_nufus_il")
         .select("nufus_il, kisi").in("mahalle_id", ids);
       if (iptal) return;
-      if (error) { setNufHata(error.message || String(error)); if (!snap) setNufIl([]); return; }
+      if (error) { setNufHata(hataMetni(error)); if (!snap) setNufIl([]); return; }
       const m = {};
       (data || []).forEach((r) => { const il = (r.nufus_il || "").trim() || "Bilinmiyor"; m[il] = (m[il] || 0) + (r.kisi || 0); });
       const arr = Object.entries(m).map(([ad, deger]) => ({ ad, deger })).sort((a, b) => b.deger - a.deger);

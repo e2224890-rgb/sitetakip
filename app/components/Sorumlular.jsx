@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../lib/supabase";
 import { UserCheck, Trash2 } from "lucide-react";
 import { oran } from "../../lib/format";
+import { hataMetni, hataOnekli } from "../../lib/hata";
 
 const ROL_SECENEK = [
   ["sorumlu", "Sorumlu"], ["koordinator", "Koordinatör"],
@@ -100,7 +101,7 @@ export default function Sorumlular({ profil }) {
         body: JSON.stringify({ ad_soyad: yh.ad, eposta: yh.eposta, sifre: yh.sifre, rol: yh.rol, telefon: yh.telefon, meslek: yh.meslek, tc_no: yh.tc, ilce_id: yh.ilce_id, site_kayit_id: BLOK_ROL.includes(yh.rol) ? yh.site_kayit_id : null, blok: BLOK_ROL.includes(yh.rol) ? yh.blok : null }),
       });
       const j = await r.json();
-      if (!r.ok) setEkDurum({ tip: "err", mesaj: j.error || "Hata" });
+      if (!r.ok) setEkDurum({ tip: "err", mesaj: hataMetni(j.error) });
       else { setEkDurum({ tip: "ok", mesaj: `${yh.eposta} oluşturuldu` }); setYh({ ad: "", eposta: "", sifre: "", rol: yh.rol, telefon: "", meslek: "", tc: "", ilce_id: yh.ilce_id, site_kayit_id: "", blok: "" }); await yukle(); }
     } catch (e) { setEkDurum({ tip: "err", mesaj: String(e) }); }
     setEkleniyor(false);
@@ -115,7 +116,7 @@ export default function Sorumlular({ profil }) {
       headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token },
       body: JSON.stringify({ id: p.id, rol: yeniRol }),
     });
-    if (!r.ok) { const j = await r.json().catch(() => ({})); alert("Rol değiştirilemedi: " + (j.error || r.status)); }
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert(hataOnekli("Rol değiştirilemedi", j.error || { status: r.status })); }
     await yukle();
   }
 

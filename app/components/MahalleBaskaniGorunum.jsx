@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
+import { cikisYap } from "../../lib/oturum";
 import { ChevronRight, LogOut, MapPin } from "lucide-react";
 import Bolgeler from "./Bolgeler";
 import Haneler from "./Haneler";
@@ -40,7 +41,7 @@ export default function MahalleBaskaniGorunum({ session, profil }) {
     })();
   }, [mahalle?.id]);
 
-  const cikis = () => supabase.auth.signOut();
+  const cikis = () => cikisYap();
 
   const Bar = ({ alt }) => (
     <header className="saha-bar">

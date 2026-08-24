@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { Building2, KeyRound, Mail } from "lucide-react";
+import { hataMetni } from "../../lib/hata";
 
 export default function Login() {
   const [eposta, setEposta] = useState("");
@@ -11,7 +12,7 @@ export default function Login() {
   async function gir(e) {
     e.preventDefault(); setHata(""); setBekle(true);
     const { error } = await supabase.auth.signInWithPassword({ email: eposta, password: sifre });
-    if (error) setHata("Giriş başarısız: " + error.message);
+    if (error) setHata(hataMetni(error));
     setBekle(false);
   }
   return (

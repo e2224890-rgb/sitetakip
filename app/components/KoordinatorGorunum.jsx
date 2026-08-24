@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabase";
+import { cikisYap } from "../../lib/oturum";
 import { cacheOku, cacheYaz } from "../../lib/cache";
 import { ShieldCheck, ChevronRight, LogOut, Home, Map, CheckCircle2, Crown } from "lucide-react";
 import { fmt, oran } from "../../lib/format";
@@ -64,7 +65,7 @@ export default function KoordinatorGorunum({ session, profil }) {
         <div className="brand"><div className="logo"><Crown size={18} /></div>
           <div><div className="brand-t">Koordinatör · {profil.ad_soyad || ""}</div>
             <div className="brand-s">{mahAd}</div></div></div>
-        <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış</button>
+        <button className="btn cikis" onClick={() => cikisYap()}><LogOut size={14} /> Çıkış</button>
       </header>
       <main className="main"><div className="page">
         <div className="crumb"><a onClick={() => setSecBolge(null)}>Sokaklarım</a>
@@ -80,7 +81,7 @@ export default function KoordinatorGorunum({ session, profil }) {
         <div className="brand"><div className="logo"><Crown size={18} /></div>
           <div><div className="brand-t">Koordinatör · {profil.ad_soyad || session.user.email}</div>
             <div className="brand-s">{mahAd}</div></div></div>
-        <button className="btn cikis" onClick={() => supabase.auth.signOut()}><LogOut size={14} /> Çıkış</button>
+        <button className="btn cikis" onClick={() => cikisYap()}><LogOut size={14} /> Çıkış</button>
       </header>
       <main className="main"><div className="page">
         {bolgeler === null ? <div className="merkez">Yükleniyor…</div>

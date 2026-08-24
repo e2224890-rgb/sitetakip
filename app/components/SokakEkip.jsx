@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
 import { UserCheck, UserPlus, Trash2, Search, Crown, X } from "lucide-react";
+import { hataOnekli } from "../../lib/hata";
 
 /*
   SokakEkip — bir sokak grubunun ekibini yönetir.
@@ -48,7 +49,14 @@ export default function SokakEkip({ grup, mahalleId, onChanged }) {
         let sorgu = supabase.from("kisi").select("id, ad, soyad, telefon").limit(20);
         if (mahalleId) sorgu = sorgu.eq("mahalle_id", mahalleId);
         // ad veya soyad eşleşmesi
-        sorgu = sorgu.or(`ad.ilike.%${q}%,soyad.ilike.%${q}%`);
+        /* FİLTRE ENJEKSİYONU. q ham girdiydi ve doğrudan PostgREST filtre
+           ifadesine gömülüyordu: virgül ek koşul ayırıcısı, parantez grup
+           ayracıdır. "Ali, Veli" gibi bir arama sorguyu bozuyor, kasıtlı bir
+           girdi ise filtreye başka kolon koşulu eklettirebiliyordu.
+           Ayırıcı karakterleri ve % _ joker'lerini temizliyoruz. */
+        const gQ = q.replace(/[,().*%_\\"']/g, " ").trim();
+        if (!gQ) { if (!iptal) { setSonuc([]); setAraniyor(false); } return; }
+        sorgu = sorgu.or(`ad.ilike.%${gQ}%,soyad.ilike.%${gQ}%`);
         const { data } = await sorgu;
         if (!iptal) setSonuc((data || []).map((k) => ({ tip: "secmen", id: k.id, ad: `${k.ad} ${k.soyad}`.trim(), tel: k.telefon || "" })));
       } else {
@@ -73,7 +81,7 @@ export default function SokakEkip({ grup, mahalleId, onChanged }) {
     };
     const { error } = await supabase.from("sokak_ekip").insert(satir);
     setMesgul(false);
-    if (error) { alert("Eklenemedi: " + error.message); return; }
+    if (error) { alert(hataOnekli("Eklenemedi", error)); return; }
     setAra(""); setSonuc([]); setElle({ ad: "", tel: "" });
     if (hedefGorev === "baskan") setEkleAcik(false);   // başkan eklendiyse paneli kapat
     await yukle(); if (onChanged) onChanged();

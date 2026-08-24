@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { blokParts } from "../../lib/format";
+import { hataMetni } from "../../lib/hata";
 
 export default function BlokSlot({ site, blok, rol, rolEtiket, mevcut, digerHesaplar, onChanged }) {
   const [ad, setAd] = useState(""); const [eposta, setEposta] = useState(""); const [sifre, setSifre] = useState("");
@@ -20,7 +21,7 @@ export default function BlokSlot({ site, blok, rol, rolEtiket, mevcut, digerHesa
       });
       const txt = await r.text();
       let j = null; try { j = JSON.parse(txt); } catch (_) { }
-      if (!r.ok || !j) setDurum({ t: "e", m: j?.error || `Sunucu hatası (${r.status}). "/api/hesap-ekle" bulunamadı ya da derlenemedi — route.js dosyasını ve dev sunucusunu kontrol et.` });
+      if (!r.ok || !j) setDurum({ t: "e", m: hataMetni(j?.error, `Sunucu hatası (${r.status}). "/api/hesap-ekle" bulunamadı ya da derlenemedi — route.js dosyasını ve dev sunucusunu kontrol et.`) });
       else { setEposta(""); setSifre(""); setAd(""); setTelefon(""); setMeslek(""); setTc(""); onChanged(); }
     } catch (e) { setDurum({ t: "e", m: String(e) }); }
     setMesgul(false);
