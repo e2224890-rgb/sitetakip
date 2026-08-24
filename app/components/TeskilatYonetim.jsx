@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
+import { hataOnekli } from "../../lib/hata";
+import { epostaUret } from "../../lib/format";
 
 /* Teşkilat Yönetimi — SADECE ilçe/il yönetimi kullanır (RLS de zorunlu kılar).
    Mahalle seçilir → ünvanlara kişi eklenir/çıkarılır. İstenirse giriş hesabı açılır
@@ -56,7 +58,7 @@ export default function TeskilatYonetim({ session, sabitMahId, onKapat, onDegist
       let profil_id = null;
       if (d.hesap) {
         // giriş hesabı aç (mahalle başkanı olarak o mahalleye bağlı)
-        const eposta = `${trSlug(d.ad) || "uye"}.${Math.random().toString(36).slice(-4)}@akpartibasaksehir.com`;
+        const eposta = epostaUret(d.ad);
         const { data: { session: s } } = await supabase.auth.getSession();
         const r = await fetch("/api/hesap-ekle", {
           method: "POST",
@@ -76,7 +78,7 @@ export default function TeskilatYonetim({ session, sabitMahId, onKapat, onDegist
       setForm((s) => ({ ...s, [unvan]: { ad: "", tel: "", kadin: false, hesap: false } }));
       await yukle(); if (onDegisti) onDegisti();
     } catch (e) {
-      alert("Eklenemedi: " + (e?.message || e));
+      alert(hataOnekli("Eklenemedi", e));
     }
     setMesgul(false);
   }

@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
+import { hataOnekli } from "../../lib/hata";
+import { epostaUret } from "../../lib/format";
 
 const SABIT_SIFRE = "saha2026"; // statik geçici şifre — kişi ilk girişte değiştirir
 
@@ -36,8 +38,7 @@ export default function SokakYonetim({ grup, userId, duzenle }) {
     setMesgul(true); setSonuc(null);
     try {
       if (hesapAc) {
-        const slug = (t) => t.toLocaleLowerCase("tr").replace(/[^a-z0-9]/g, "");
-        const eposta = `${slug(ad) || "uye"}.${Math.random().toString(36).slice(-4)}@akpartibasaksehir.com`;
+        const eposta = epostaUret(ad);
         const sifre = SABIT_SIFRE;
         const { data: { session } } = await supabase.auth.getSession();
         const r = await fetch("/api/hesap-ekle", {
@@ -58,7 +59,7 @@ export default function SokakYonetim({ grup, userId, duzenle }) {
       }
       setAd(""); setTel(""); await yukle();
     } catch (e) {
-      alert("Eklenemedi: " + (e?.message || e));
+      alert(hataOnekli("Eklenemedi", e));
     }
     setMesgul(false);
   }
@@ -83,7 +84,7 @@ export default function SokakYonetim({ grup, userId, duzenle }) {
       if (error) throw error;
       await yukle();
     } catch (e) {
-      alert("Silinemedi: " + (e?.message || e));
+      alert(hataOnekli("Silinemedi", e));
     }
   }
 
